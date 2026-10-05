@@ -7,6 +7,10 @@ Blender 用の手続き型アセット生成ツール。外部のアセット・
   - 実寸の断面（底のドームと接地リング、ネック、二重巻締め、フタの段差、補強ビード）を回転させて作成
   - リベット、プルタブ（指穴・リベット周りの切り込み）、開け口の溝
   - 胴に円筒 UV、ラベルは Blender 内でレンダーして生成（`label.py`）
+- `blender_toolkit/generators/onigiri.py` — おにぎり（三角）
+  - 角の丸い三角形をふくらませた本体に、握ったような凹凸
+  - ご飯粒を 1 粒ずつ配置（重ならない間隔、つぶれ・反り・太さのばらつき、粒ごとの色の違い）
+  - のり：張りのあるシートとして下半分を包む（縁の不揃い、ゆるい波と折り目）
 - `blender_toolkit/materials.py` — 手続き型マテリアル（アルミ、印刷ラベル）
 - `blender_toolkit/preview.py` — 確認用プレビュー（スタジオ照明、複数アングル）
 
@@ -15,6 +19,8 @@ Blender 用の手続き型アセット生成ツール。外部のアセット・
 ```
 blender -b --factory-startup --python Blender/scripts/render_can.py -- <出力フォルダ> 350ml
 ```
+
+おにぎりは `scripts/render_onigiri.py`。
 
 出力フォルダに `front.png` などのプレビューと `can_350ml.blend` ができます。
 
