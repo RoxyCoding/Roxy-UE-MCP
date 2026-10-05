@@ -180,7 +180,12 @@ def from_jsonable(value: Any, current: Any, hint: str = '') -> Any:
             new = type(current)()
             new.import_text(value)
             return new
-        new = type(current)()
+        # Partial dicts are merged into the existing value so unspecified fields (e.g. the font
+        # object/typeface of a SlateFontInfo when only "size" is given) are preserved.
+        try:
+            new = current.copy()
+        except Exception:  # pylint: disable=broad-exception-caught
+            new = type(current)()
         for k, v in value.items():
             new.set_editor_property(k, from_jsonable(v, new.get_editor_property(k), f'{hint}.{k}'))
         return new

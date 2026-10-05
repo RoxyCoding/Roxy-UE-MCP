@@ -96,6 +96,34 @@ def _function_path(identifier: str) -> str:
     return f'{cls.get_path_name()}:{fn}'
 
 
+def _find_event_node(graph: unreal.EdGraph, identifier: str):
+    """Existing K2Node_Event for an overridable event ("ReceiveTick" or "Tick"), or None."""
+    wanted = {identifier.lower(), ('receive' + identifier).lower()}
+    for node in bpu.graph_nodes(graph):
+        if node.get_class().get_name() != 'K2Node_Event':
+            continue
+        try:
+            name = str(node.get_editor_property('event_reference').get_editor_property('member_name'))
+        except Exception:  # pylint: disable=broad-exception-caught
+            continue
+        if name.lower() in wanted:
+            return node
+    return None
+
+
+def _widget_variable(bp: unreal.Blueprint, name: str):
+    """Designer widget (a widget-variable in a Widget Blueprint) by name, else None."""
+    if not isinstance(bp, unreal.WidgetBlueprint):
+        return None
+    lib = getattr(unreal, 'AgentToolkitWorldLibrary', None)
+    if lib is None:
+        return None
+    try:
+        return lib.find_widget_in_blueprint(bp, name)
+    except Exception:  # pylint: disable=broad-exception-caught
+        return None
+
+
 def _graph_editor(bp: unreal.Blueprint, graph_name: str | None):
     graph = bpu.find_graph(bp, graph_name or '')
     return graph, bpu.graph_editor(graph)
@@ -503,11 +531,15 @@ class BlueprintAuthoringTools(unreal.ToolsetDefinition):
             identifier: Depends on node_kind:
                 function -> "Class:Function" (e.g. "KismetSystemLibrary:PrintString", "Character:Jump",
                     "/Script/Engine.Pawn:AddMovementInput");
-                event -> overridable event function, e.g. "ReceiveBeginPlay", "ReceiveTick", "ReceiveActorBeginOverlap";
+                event -> overridable event function, e.g. "ReceiveBeginPlay", "ReceiveTick", "ReceiveActorBeginOverlap"
+                    (an already existing event node, such as a widget's default Tick, is returned, not duplicated);
                 custom_event -> event name; variable_get/variable_set -> variable name;
                 macro -> standard macro name (ForEachLoop, DoOnce, Gate, IsValid, FlipFlop, WhileLoop) or macro path;
                 component_event -> "ComponentName:DelegateName" (e.g. "Box:OnComponentBeginOverlap");
-                action -> action string from search_blueprint_node_actions (localized, last resort).
+                    in a Widget Blueprint ComponentName may be a widget variable (e.g. "StartButton:OnClicked");
+                action -> action string from search_blueprint_node_actions (localized, last resort; needed for
+                    nodes function cannot create, e.g. "UserWidget:GetOwningPlayer" or property setters such as
+                    PlayerController SetShowMouseCursor in UE 5.8).
             graph_name: Target graph (default EventGraph).
             x: Node X position.
             y: Node Y position.
@@ -522,6 +554,13 @@ class BlueprintAuthoringTools(unreal.ToolsetDefinition):
         if kind == 'function':
             node = ed.add_call_function_node(_function_path(identifier))
         elif kind == 'event':
+            existing = _find_event_node(graph, identifier)
+            if existing is not None:
+                # Widget Blueprints and others already ship default Tick/BeginPlay nodes; a second
+                # one would be a duplicate event that fails to compile.
+                ctx().warn(f'Event {identifier!r} already exists in the graph; returning the existing node.',
+                           'EVENT_EXISTS')
+                return bpu.node_info(existing)
             node = BEL.add_event_override(bp, identifier, unreal.IntPoint(x, y))
             if node is None and not identifier.startswith('Receive'):
                 node = BEL.add_event_override(bp, 'Receive' + identifier, unreal.IntPoint(x, y))
@@ -538,8 +577,10 @@ class BlueprintAuthoringTools(unreal.ToolsetDefinition):
             node = ed.add_macro_node(path)
         elif kind == 'component_event':
             comp_name, _, delegate = identifier.partition(':')
-            _, data = bpu.find_subobject(bp, comp_name)
-            template = unreal.SubobjectDataBlueprintFunctionLibrary.get_object_for_blueprint(data, bp)
+            template = _widget_variable(bp, comp_name)
+            if template is None:
+                _, data = bpu.find_subobject(bp, comp_name)
+                template = unreal.SubobjectDataBlueprintFunctionLibrary.get_object_for_blueprint(data, bp)
             node = ed.add_component_bound_event_node(template, delegate)
         elif kind == 'action':
             actions = list(ed.list_available_nodes([]) or [])

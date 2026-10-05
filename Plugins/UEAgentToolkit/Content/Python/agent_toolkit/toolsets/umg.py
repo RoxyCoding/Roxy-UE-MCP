@@ -121,7 +121,8 @@ class UMGTools(unreal.ToolsetDefinition):
         Args:
             widget_blueprint: Widget Blueprint path.
             widget_name: Widget name.
-            properties_json: JSON object of property names to values.
+            properties_json: JSON object of property names to values. Struct values given as objects are
+                merged into the current value, e.g. {"font": {"size": 28}} keeps the font object and typeface.
         """
         wbp = _wbp(widget_blueprint)
         widget = _widget(wbp, widget_name)
