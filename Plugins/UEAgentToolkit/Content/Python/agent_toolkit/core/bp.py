@@ -259,21 +259,45 @@ def event_infos(bp: unreal.Blueprint, implemented_only: bool = False) -> list[di
     return out
 
 
+def _subobjects(bp: unreal.Blueprint) -> list[tuple[Any, Any]]:
+    """Unique (handle, data) pairs of a Blueprint's subobjects.
+
+    k2_gather_subobject_data_for_blueprint can report nested (grand-child) components more
+    than once, so entries are de-duplicated by their template object.
+    """
+    sds = unreal.get_engine_subsystem(unreal.SubobjectDataSubsystem)
+    lib = unreal.SubobjectDataBlueprintFunctionLibrary
+    try:
+        handles = sds.k2_gather_subobject_data_for_blueprint(bp) or []
+    except Exception:  # pylint: disable=broad-exception-caught
+        return []
+    seen, out = set(), []
+    for h in handles:
+        data = sds.k2_find_subobject_data_from_handle(h)
+        if data is None:
+            continue
+        obj = lib.get_object(data)
+        key = obj.get_path_name() if obj else str(lib.get_variable_name(data))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((h, data))
+    return out
+
+
+def _component_names(data) -> tuple[str, str]:
+    """(variable name, object name) of a component, e.g. ("Mesh", "CharacterMesh0")."""
+    lib = unreal.SubobjectDataBlueprintFunctionLibrary
+    obj = lib.get_object(data)
+    return str(lib.get_variable_name(data)), (obj.get_name() if obj else '')
+
+
 def component_tree(bp: unreal.Blueprint) -> list[dict]:
     """Flat list of components with parent links (SCS + inherited)."""
     sds = unreal.get_engine_subsystem(unreal.SubobjectDataSubsystem)
     lib = unreal.SubobjectDataBlueprintFunctionLibrary
     out = []
-    try:
-        handles = sds.k2_gather_subobject_data_for_blueprint(bp) or []
-    except Exception:  # pylint: disable=broad-exception-caught
-        return out
-    datas = []
-    for h in handles:
-        data = sds.k2_find_subobject_data_from_handle(h)
-        if data is not None:
-            datas.append((h, data))
-    for h, data in datas:
+    for _, data in _subobjects(bp):
         if lib.is_actor(data):
             continue
         obj = lib.get_object(data)
@@ -283,14 +307,17 @@ def component_tree(bp: unreal.Blueprint) -> list[dict]:
             parent_data = sds.k2_find_subobject_data_from_handle(parent_handle)
             if parent_data is not None and not lib.is_actor(parent_data):
                 parent = str(lib.get_variable_name(parent_data))
+        name, object_name = _component_names(data)
         entry = {
-            'name': str(lib.get_variable_name(data)),
+            'name': name,
             'class': obj.get_class().get_name() if obj else None,
             'parent': parent if parent and not parent.startswith('None') else None,
             'inherited': bool(lib.is_inherited_component(data)),
             'native': bool(lib.is_native_component(data)),
             'root': bool(lib.is_root_component(data)),
         }
+        if object_name and object_name != name:
+            entry['object_name'] = object_name
         if isinstance(obj, unreal.SceneComponent):
             entry['relative_location'] = to_jsonable(obj.get_editor_property('relative_location'))
         out.append(entry)
@@ -298,20 +325,22 @@ def component_tree(bp: unreal.Blueprint) -> list[dict]:
 
 
 def find_subobject(bp: unreal.Blueprint, component_name: str) -> tuple[Any, Any]:
-    """Returns (handle, data) for a component in the Blueprint's SCS."""
-    sds = unreal.get_engine_subsystem(unreal.SubobjectDataSubsystem)
+    """Returns (handle, data) for a component, matched by variable name (e.g. "Mesh") or
+    object name (e.g. "CharacterMesh0"), case-insensitively."""
     lib = unreal.SubobjectDataBlueprintFunctionLibrary
-    names = []
-    for h in sds.k2_gather_subobject_data_for_blueprint(bp) or []:
-        data = sds.k2_find_subobject_data_from_handle(h)
-        if data is None:
+    candidates = []
+    wanted = (component_name or '').lower()
+    for h, data in _subobjects(bp):
+        if lib.is_actor(data):
+            if component_name in ('', 'root_actor'):
+                return h, data
             continue
-        name = str(lib.get_variable_name(data))
-        names.append(name)
-        if name == component_name or (lib.is_actor(data) and component_name in ('', 'root_actor')):
+        name, object_name = _component_names(data)
+        if wanted in (name.lower(), object_name.lower()):
             return h, data
+        candidates.append(name if not object_name or object_name == name else f'{name} (object: {object_name})')
     raise ToolError(Code.OBJECT_NOT_FOUND, f'Component {component_name!r} not found in {bp.get_path_name()}',
-                    target=bp.get_path_name(), likely_causes=[f'Components: {names}'])
+                    target=bp.get_path_name(), likely_causes=[f'Components: {candidates}'])
 
 
 def implemented_interfaces(bp: unreal.Blueprint) -> list[str]:
@@ -325,6 +354,39 @@ def implemented_interfaces(bp: unreal.Blueprint) -> list[str]:
         return [to_jsonable(i) for i in bp.get_editor_property('implemented_interfaces')]
     except Exception:  # pylint: disable=broad-exception-caught
         return []
+
+
+def stale_level_actors(limit: int = 50) -> list[dict]:
+    """Level actors whose class is a leftover of a recompiled/recreated Blueprint
+    (REINST_/TRASHCLASS_ classes in the transient package). Compiling Blueprints that touch
+    them (e.g. Anim Blueprints re-initializing on those actors) raises Blueprint runtime errors."""
+    # pylint: disable-next=import-outside-toplevel
+    from .resolve import all_level_actors
+    out = []
+    for a in all_level_actors():
+        cls = a.get_class()
+        name = cls.get_name()
+        if name.startswith(('REINST_', 'TRASHCLASS_', 'HOTRELOADED_')) or \
+                cls.get_outermost().get_name() == '/Engine/Transient':
+            out.append({'label': a.get_actor_label(), 'class': name, 'path': a.get_path_name()})
+            if len(out) >= limit:
+                break
+    return out
+
+
+def require_no_stale_actors(ignore: bool) -> None:
+    """Refuses to compile while stale actors exist: the Blueprint runtime errors they trigger
+    during reinstancing would otherwise fail the whole tool call with a raw message."""
+    stale = stale_level_actors()
+    if stale and not ignore:
+        raise ToolError(Code.EDITOR_STATE,
+                        f'{len(stale)} level actors still use an outdated Blueprint class (e.g. {stale[0]["class"]})',
+                        likely_causes=['A Blueprint was deleted/recreated while instances were placed. Delete these '
+                                       'actors (LevelTools.delete_actors) and place the current Blueprint again, or '
+                                       'reload the level, then compile.',
+                                       'Pass ignore_stale_actors=true to compile anyway (may fail with a raw '
+                                       'Blueprint runtime error).'],
+                        retryable=True, details={'stale_actors': stale})
 
 
 def compile_report(bp: unreal.Blueprint, compile_first: bool = True) -> dict:

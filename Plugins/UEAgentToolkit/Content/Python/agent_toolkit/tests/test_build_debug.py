@@ -29,6 +29,36 @@ class TestBuildDebug(ToolTestCase):
         self.assertTrue(err['likely_causes'])
         self.assertTrue(env['details']['errors'][0]['node'])
 
+    def test_stale_actor_preflight(self):
+        from unittest import mock
+        from agent_toolkit.core import resolve
+
+        class _Cls:
+            def get_name(self):
+                return 'REINST_BP_Enemy_C_1'
+
+            def get_outermost(self):
+                return self
+
+        class _Actor:
+            def get_class(self):
+                return _Cls()
+
+            def get_actor_label(self):
+                return 'BP_Enemy_Old'
+
+            def get_path_name(self):
+                return '/Temp/Level.Level:PersistentLevel.BP_Enemy_Old'
+
+        self.make_blueprint('BP_StaleCheck')
+        with mock.patch.object(resolve, 'all_level_actors', return_value=[_Actor()]):
+            env = self.call('compile_blueprint', asset_path=f'{TEST_ROOT}/BP_StaleCheck')
+            err = self.assertFails(env, 'EDITOR_STATE')
+            self.assertTrue(err['retryable'])
+            self.assertEqual(env['details']['stale_actors'][0]['class'], 'REINST_BP_Enemy_C_1')
+            self.assertOk(self.call('compile_blueprint', asset_path=f'{TEST_ROOT}/BP_StaleCheck', ignore_stale_actors=True))
+        self.assertOk(self.call('compile_blueprint', asset_path=f'{TEST_ROOT}/BP_StaleCheck'))
+
     def test_compile_folder(self):
         self.make_blueprint('BP_Folder1')
         d = self.assertOk(self.call('compile_blueprints_in_folder', path=TEST_ROOT, only_report_problems=False))

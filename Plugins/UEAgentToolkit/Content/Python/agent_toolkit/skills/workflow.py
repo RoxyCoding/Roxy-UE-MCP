@@ -7,15 +7,15 @@ from toolset_registry.agent_skill import agent_skill
 _INSTRUCTIONS = """\
 RESULTS
 - Every agent_toolkit tool returns {success, errors[], warnings[], target, modified,
-  dirtied_packages[], details_json}. Never assume success: read `errors[0].code`,
-  `likely_causes` and `retryable`. details_json still carries reports/previews on failure.
-- CONFIRMATION_REQUIRED is not a failure of your plan: details_json holds the dry-run
+  dirtied_packages[], details{}}. Never assume success: read `errors[0].code`,
+  `likely_causes` and `retryable`. details still carries reports/previews on failure.
+- CONFIRMATION_REQUIRED is not a failure of your plan: details holds the dry-run
   preview; review it, then repeat the call with confirm=true.
 
 SELF-CORRECTION LOOP (Blueprints, Materials, Input)
 1. Inspect before editing (inspect_blueprint / inspect_blueprint_graph / inspect_material).
 2. Make all edits for one logical unit, then compile once.
-3. On COMPILE_FAILED read details_json.errors (graph, node id, message), inspect only the
+3. On COMPILE_FAILED read details.errors (graph, node id, message), inspect only the
    offending nodes (only_nodes_with_messages=true), fix, recompile.
 4. Validate (validate_blueprint / validate_level / validate_project) before declaring done.
 - Node ids ("K2Node_CallFunction_3") and pins ("NodeId.PinName") from inspect output are the

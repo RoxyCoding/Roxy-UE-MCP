@@ -17,6 +17,16 @@ class TestValidation(ToolTestCase):
         naming = d['sections']['naming']['issues']
         self.assertTrue(any(i['target'].endswith('/BadName') and i['suggested_name'] == 'IA_BadName' for i in naming))
 
+    def test_empty_and_missing_scope(self):
+        empty = f'{TEST_ROOT}/EmptyFolder'
+        unreal.get_editor_subsystem(unreal.EditorAssetSubsystem).make_directory(empty)
+        env = self.call('validate_project', path=empty)
+        d = self.assertOk(env)
+        self.assertEqual(d['scanned_assets'], 0)
+        self.assertTrue(any(w['code'] == 'EMPTY_SCOPE' for w in env['warnings']), env['warnings'])
+        self.assertEqual(self.assertOk(self.call('find_missing_references', path=empty))['scanned_assets'], 0)
+        self.assertFails(self.call('validate_project', path='/Game/NoSuchFolderXYZ'), 'OBJECT_NOT_FOUND')
+
     def test_fix_naming_requires_confirm_then_renames(self):
         unreal.AssetToolsHelpers.get_asset_tools().create_asset('Jump', TEST_ROOT, unreal.InputAction,
                                                                 unreal.InputAction_Factory())

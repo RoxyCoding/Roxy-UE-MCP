@@ -73,7 +73,7 @@ def to_jsonable(value: Any, depth: int = 0) -> Any:
 
 
 def dumps(value: Any) -> str:
-    """Serializes a payload compactly for details_json."""
+    """Serializes a payload compactly (tool result envelopes)."""
     return json.dumps(to_jsonable(value), ensure_ascii=False, separators=(',', ':'), default=str)
 
 

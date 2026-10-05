@@ -46,6 +46,9 @@ Native プラグインが無い場合でも Python 側は動作し、該当 Tool
 
 ## Tool の返り値
 
+Tool は次の JSON を**文字列**として返します（MCP の結果テキスト `{"returnValue": "<JSON>"}`）。
+出力スキーマが 1 行で済むため `describe_toolset` が軽く、`details` は通常のネストしたオブジェクトです。
+
 ```json
 {
   "success": false,
@@ -54,14 +57,14 @@ Native プラグインが無い場合でも Python 側は動作し、該当 Tool
   "modified": false,
   "dirtied_packages": [],
   "errors": [{"code": "COMPILE_FAILED", "message": "...", "target": "...",
-              "ue_error": "...", "likely_causes": ["[EventGraph] Add Movement Input: ..."], "retryable": false}],
+              "likely_causes": ["[EventGraph] Add Movement Input: ..."], "retryable": false}],
   "warnings": [],
-  "details_json": "{\"status\":\"error\",\"errors\":[{\"graph\":\"EventGraph\",\"node\":\"K2Node_CallFunction_0\",...}]}"
+  "details": {"status": "error", "errors": [{"graph": "EventGraph", "node": "K2Node_CallFunction_0", "message": "..."}]}
 }
 ```
 
 - エラーコード: `INVALID_ARGUMENT, ASSET_NOT_FOUND, ACTOR_NOT_FOUND, OBJECT_NOT_FOUND, CLASS_NOT_FOUND, ALREADY_EXISTS, WRONG_TYPE, AMBIGUOUS, COMPILE_FAILED, EDITOR_STATE, CONFIRMATION_REQUIRED, NOT_SUPPORTED, UE_OPERATION_FAILED, INTERNAL_ERROR`
-- 失敗時も `details_json` にレポート（Compile 結果、Dry Run プレビュー等）が入ります。
+- 失敗時も `details` にレポート（Compile 結果、Dry Run プレビュー等）が入ります。
 - 例外で落ちることはなく、必ず構造化結果を返します。
 
 ## 安全策
@@ -85,7 +88,7 @@ MODE=cmd Plugins/UEAgentToolkit/Scripts/run_tests.sh   # Commandlet（Undo 等 E
 Plugins/UEAgentToolkit/Scripts/run_tests.sh "" test_inspector,test_assets
 ```
 Editor 内では Session Frontend の `AI.Toolsets.UEAgentToolkit` からも実行できます。
-現状: **74 tests / 全パス**（Tool 登録・Schema、正常系、無効 Asset、存在しない Object、Compile Error、Editor 状態、Undo/Redo、ロールバック）。
+現状: **75 tests / 全パス**（Tool 登録・Schema、正常系、無効 Asset、存在しない Object、Compile Error、Editor 状態、Undo/Redo、ロールバック）。
 
 ## Epic 公式 Toolset との分担（主なもの）
 

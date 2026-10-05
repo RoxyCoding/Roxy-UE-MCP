@@ -498,6 +498,8 @@ class AssetManagementTools(unreal.ToolsetDefinition):
             limit: Maximum candidates listed.
         """
         assets = deps.assets_in_path(path, True, split_csv(class_names))
+        if not assets:
+            ctx().warn(f'No assets found under {path}: nothing was checked.', 'EMPTY_SCOPE', target=path)
         unused = []
         for a in assets:
             cls = deps.asset_class_name(a)

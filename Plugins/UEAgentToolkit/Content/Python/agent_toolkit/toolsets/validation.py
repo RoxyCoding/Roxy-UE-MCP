@@ -38,12 +38,29 @@ def _issue(severity: str, code: str, message: str, target: str) -> dict:
     return {'severity': severity, 'code': code, 'message': message, 'target': target}
 
 
-def _summary(issues: list[dict], limit: int) -> dict:
+def _summary(issues: list[dict], limit: int, scanned: int | None = None) -> dict:
     counts: dict[str, int] = defaultdict(int)
     for i in issues:
         counts[i['severity']] += 1
-    return {'issue_count': len(issues), 'counts': dict(counts), 'truncated': len(issues) > limit,
-            'issues': issues[:limit]}
+    out = {'issue_count': len(issues), 'counts': dict(counts), 'truncated': len(issues) > limit,
+           'issues': issues[:limit]}
+    if scanned is not None:
+        out['scanned_assets'] = scanned
+    return out
+
+
+def _scope(path: str) -> int:
+    """Validates a folder scope and returns its asset count; warns when nothing can be checked
+    so an empty folder is never mistaken for a healthy one."""
+    if not editor.asset_subsystem().does_directory_exist(path):
+        raise ToolError(Code.OBJECT_NOT_FOUND, f'Folder {path} does not exist', target=path,
+                        likely_causes=['Use a content path such as /Game or /Game/Characters.'])
+    count = len(deps.assets_in_path(path, True))
+    ctx().set_target(path)
+    if count == 0:
+        ctx().warn(f'{path} contains no assets: nothing was checked, so "0 issues" does not mean healthy.',
+                   'EMPTY_SCOPE', target=path)
+    return count
 
 
 # ---------------------------------------------------------------- individual checks
@@ -204,6 +221,10 @@ def level_issues(limit: int) -> list[dict]:
                 seen[key] = label
         if len(issues) >= limit * 5:
             break
+    for st in bpu.stale_level_actors():
+        issues.append(_issue('error', 'STALE_ACTOR_CLASS',
+                             f"uses outdated class {st['class']} (Blueprint was recreated); delete and re-place it",
+                             st['label']))
     gms = unreal.GameMapsSettings.get_game_maps_settings()
     if not any(isinstance(a, unreal.PlayerStart) for a in actors):
         issues.append(_issue('info', 'NO_PLAYER_START', 'level has no PlayerStart (pawn spawns at origin)',
@@ -239,8 +260,11 @@ class ValidationTools(unreal.ToolsetDefinition):
             include_unused: Also list unreferenced assets (slower).
             limit_per_check: Maximum issues listed per check (counts are complete).
         """
-        ctx().set_target(path)
+        scanned = _scope(path)
         sections = {
+            'stale_actors': [_issue('error', 'STALE_ACTOR_CLASS', f"level actor uses outdated class {st['class']}; "
+                                    'compiling related Blueprints may raise runtime errors', st['label'])
+                             for st in bpu.stale_level_actors()],
             'missing_references': check_missing_references(path, limit_per_check),
             'broken_assets': check_broken_assets(path, False, limit_per_check),
             'redirectors': [_issue('warning', 'REDIRECTOR', 'redirector should be fixed up', str(r.package_name))
@@ -251,9 +275,12 @@ class ValidationTools(unreal.ToolsetDefinition):
             'unsaved': check_unsaved(),
         }
         bp_issues = []
-        for data in deps.assets_in_path(path, True, ['Blueprint', 'WidgetBlueprint', 'AnimBlueprint']):
+        bp_assets = deps.assets_in_path(path, True, ['Blueprint', 'WidgetBlueprint', 'AnimBlueprint'])
+        bp_checked = 0
+        for data in bp_assets:
             bp = data.get_asset() if (compile_blueprints or data.is_asset_loaded()) else None
             if isinstance(bp, unreal.Blueprint):
+                bp_checked += 1
                 bp_issues += [i for i in blueprint_issues(bp, compile_blueprints) if i['severity'] != 'info']
         sections['blueprints'] = bp_issues
         if include_unused:
@@ -266,7 +293,8 @@ class ValidationTools(unreal.ToolsetDefinition):
         for items in sections.values():
             for i in items:
                 totals[i['severity']] += 1
-        return {'path': path, 'totals': dict(totals), 'sections': report,
+        return {'path': path, 'scanned_assets': scanned, 'blueprints': len(bp_assets),
+                'blueprints_checked': bp_checked, 'totals': dict(totals), 'sections': report,
                 'note': '' if compile_blueprints else 'Only loaded Blueprints were checked; pass compile_blueprints=true for all.'}
 
     @agent_tool()
@@ -328,8 +356,8 @@ class ValidationTools(unreal.ToolsetDefinition):
             path: Folder to scan.
             limit: Maximum issues listed.
         """
-        ctx().set_target(path)
-        return _summary(check_missing_references(path, limit), limit)
+        scanned = _scope(path)
+        return _summary(check_missing_references(path, limit), limit, scanned)
 
     @agent_tool()
     def find_broken_assets(path: str = '/Game', load_assets: bool = False, limit: int = 200) -> dict:
@@ -341,8 +369,8 @@ class ValidationTools(unreal.ToolsetDefinition):
             load_assets: Also try loading every asset (slow on large folders).
             limit: Maximum issues listed.
         """
-        ctx().set_target(path)
-        return _summary(check_broken_assets(path, load_assets, limit), limit)
+        scanned = _scope(path)
+        return _summary(check_broken_assets(path, load_assets, limit), limit, scanned)
 
     @agent_tool()
     def find_null_properties(target: str) -> dict:
@@ -408,8 +436,8 @@ class ValidationTools(unreal.ToolsetDefinition):
             for i, m in enumerate(mats):
                 if m is None or m.get_outermost().get_name() in _DEFAULT_MATERIALS:
                     issues.append(_issue('warning', 'MISSING_MATERIAL', f'material slot {i} is empty/default', package))
-        ctx().set_target(path)
-        return _summary(issues, limit)
+        scanned = _scope(path)
+        return _summary(issues, limit, scanned)
 
     @agent_tool()
     def find_invalid_collision(path: str = '/Game', limit: int = 200) -> dict:
@@ -432,8 +460,8 @@ class ValidationTools(unreal.ToolsetDefinition):
                 continue
             if simple == 0 and 'COMPLEX_AS_SIMPLE' not in str(complexity):
                 issues.append(_issue('warning', 'NO_SIMPLE_COLLISION', 'mesh has no simple collision', str(data.package_name)))
-        ctx().set_target(path)
-        return _summary(issues, limit)
+        scanned = _scope(path)
+        return _summary(issues, limit, scanned)
 
     @agent_tool()
     def find_duplicate_asset_names(path: str = '/Game', limit: int = 200) -> dict:
@@ -443,8 +471,8 @@ class ValidationTools(unreal.ToolsetDefinition):
             path: Folder to scan.
             limit: Maximum issues listed.
         """
-        ctx().set_target(path)
-        return _summary(check_duplicate_names(path), limit)
+        scanned = _scope(path)
+        return _summary(check_duplicate_names(path), limit, scanned)
 
     @agent_tool()
     def check_naming_conventions(path: str = '/Game', prefixes_json: str | None = None, limit: int = 200) -> dict:
@@ -458,8 +486,8 @@ class ValidationTools(unreal.ToolsetDefinition):
         """
         prefixes = dict(DEFAULT_PREFIXES)
         prefixes.update(parse_json_arg(prefixes_json or '', 'prefixes_json', dict))
-        ctx().set_target(path)
-        return _summary(check_naming(path, prefixes), limit)
+        scanned = _scope(path)
+        return _summary(check_naming(path, prefixes), limit, scanned)
 
     @agent_tool()
     def check_asset_placement(path: str = '/Game', rules_json: str | None = None, limit: int = 200) -> dict:
@@ -471,8 +499,8 @@ class ValidationTools(unreal.ToolsetDefinition):
             rules_json: Optional JSON {"Texture2D": "/Game/Textures", "StaticMesh": "/Game/Meshes"}.
             limit: Maximum issues listed.
         """
-        ctx().set_target(path)
-        return _summary(check_placement(path, parse_json_arg(rules_json or '', 'rules_json', dict)), limit)
+        scanned = _scope(path)
+        return _summary(check_placement(path, parse_json_arg(rules_json or '', 'rules_json', dict)), limit, scanned)
 
     @agent_tool()
     def find_unsaved_assets() -> dict:

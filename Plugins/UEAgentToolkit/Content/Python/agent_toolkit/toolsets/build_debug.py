@@ -51,16 +51,19 @@ class BuildDebugTools(unreal.ToolsetDefinition):
     asserts/ensures, and trace error text back to assets."""
 
     @agent_tool()
-    def compile_blueprint(asset_path: str) -> dict:
+    def compile_blueprint(asset_path: str, ignore_stale_actors: bool = False) -> dict:
         """Compiles one Blueprint and returns status plus every node-level error/warning
         (graph, node id, title, message). Use inspect_blueprint_graph(only_nodes_with_messages)
         for pin-level context and fix, then compile again.
 
         Args:
             asset_path: Blueprint (Actor/Widget/Anim/...) asset path.
+            ignore_stale_actors: Compile even if level actors still use an outdated class of a
+                recreated Blueprint (otherwise refused with EDITOR_STATE and the actor list).
         """
         bp = resolve.load_asset(asset_path, unreal.Blueprint)
         ctx().set_target(bp.get_outermost().get_name())
+        bpu.require_no_stale_actors(ignore_stale_actors)
         report = bpu.compile_report(bp, compile_first=True)
         for e in report['errors']:
             ctx().warn(e['message'], 'BLUEPRINT_COMPILE_ERROR', f"{report['asset']}:{e['graph']}:{e['node']}")
@@ -72,14 +75,17 @@ class BuildDebugTools(unreal.ToolsetDefinition):
         return report
 
     @agent_tool()
-    def compile_blueprints_in_folder(path: str = '/Game', only_report_problems: bool = True, limit: int = 500) -> dict:
+    def compile_blueprints_in_folder(path: str = '/Game', only_report_problems: bool = True, limit: int = 500,
+                                     ignore_stale_actors: bool = False) -> dict:
         """Compiles every Blueprint under a folder and summarises the results.
 
         Args:
             path: Folder to scan.
             only_report_problems: Omit Blueprints that compiled cleanly from the list.
             limit: Maximum Blueprints to compile.
+            ignore_stale_actors: Compile even if outdated Blueprint instances are in the level.
         """
+        bpu.require_no_stale_actors(ignore_stale_actors)
         classes = ['Blueprint', 'WidgetBlueprint', 'AnimBlueprint', 'EditorUtilityBlueprint',
                    'EditorUtilityWidgetBlueprint', 'ControlRigBlueprint']
         assets = deps.assets_in_path(path, True, classes)[:limit]

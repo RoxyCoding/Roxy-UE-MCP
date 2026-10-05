@@ -46,7 +46,7 @@ class ToolError(Exception):
         self.likely_causes = list(likely_causes or [])
         self.retryable = _RETRYABLE_DEFAULT.get(code, False) if retryable is None else retryable
         self.ue_error = ue_error
-        self.details = details  # optional payload returned in details_json (reports, previews)
+        self.details = details  # optional payload returned in details (reports, previews)
 
 
 def require(condition: object, code: str, message: str, target: str = '',

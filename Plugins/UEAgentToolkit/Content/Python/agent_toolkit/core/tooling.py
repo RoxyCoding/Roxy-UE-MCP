@@ -1,7 +1,7 @@
 """The @agent_tool decorator: turns a plain function into a ToolsetRegistry tool.
 
 Responsibilities (kept here so tool bodies stay small):
-  * wraps the body's dict result into an AgentToolResult envelope,
+  * wraps the body's dict result into the JSON result envelope (see core/result.py),
   * converts ToolError / unexpected exceptions into structured errors (never raises),
   * opens an editor undo transaction for mutating tools,
   * reports packages newly dirtied by the call,
@@ -28,7 +28,7 @@ import toolset_registry
 
 from . import editor
 from .errors import Code, ToolError
-from .result import AgentToolResult, make_issue
+from .result import make_issue
 from .serialize import dumps, to_jsonable
 
 _TRANSACTION_PREFIX = 'AgentToolkit: '
@@ -119,11 +119,10 @@ def agent_tool(mutates: bool = False, allow_during_pie: bool | None = None,
         name = func.__name__
 
         @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> AgentToolResult:
+        def wrapper(*args: Any, **kwargs: Any) -> str:
             context = ToolContext(name)
             token = _current.set(context)
-            result = AgentToolResult()
-            result.tool = name
+            success, errors = False, []
             details: Any = {}
             started = time.time()
             before = editor.dirty_package_names() if mutates else set()
@@ -137,39 +136,40 @@ def agent_tool(mutates: bool = False, allow_during_pie: bool | None = None,
                         details = func(*args, **kwargs)
                 else:
                     details = func(*args, **kwargs)
-                result.success = True
+                success = True
             except Exception as e:  # pylint: disable=broad-exception-caught
-                result.success = False
                 issue = _issue_from_exception(e, name)
-                result.errors = [issue]
-                if not context.target and issue.target:
-                    context.target = issue.target
+                errors = [issue]
+                if not context.target and issue.get('target'):
+                    context.target = issue['target']
                 if isinstance(e, ToolError) and e.details is not None:
                     details = e.details
             finally:
                 _current.reset(token)
 
             dirtied = sorted(editor.dirty_package_names() - before) if mutates else []
-            result.dirtied_packages = dirtied
-            result.modified = bool(context.modified) if context.modified is not None else \
-                bool(mutates and result.success and (dirtied or details))
-            result.target = context.target or ''
-            result.warnings = context.warnings
+            modified = bool(context.modified) if context.modified is not None else                 bool(mutates and success and (dirtied or details))
+            envelope = {'success': success, 'tool': name, 'target': context.target or '', 'modified': modified,
+                        'dirtied_packages': dirtied, 'errors': errors, 'warnings': context.warnings,
+                        'details': details if details is not None else {}}
             try:
-                result.details_json = dumps(details if details is not None else {})
+                text = dumps(envelope)
             except Exception as e:  # pylint: disable=broad-exception-caught
-                result.details_json = json.dumps({'unserializable_details': str(e)})
-            if mutates and result.modified:
+                envelope['details'] = {'unserializable_details': str(e)}
+                text = dumps(envelope)
+            if mutates and modified:
                 _Journal.record({
                     'time': time.strftime('%Y-%m-%dT%H:%M:%S'), 'tool': name,
-                    'target': result.target, 'success': result.success,
+                    'target': envelope['target'], 'success': success,
                     'dirtied_packages': dirtied, 'duration_ms': int((time.time() - started) * 1000),
                 })
-            return result
+            return text
 
-        wrapper.__signature__ = sig.replace(return_annotation=AgentToolResult)  # type: ignore[attr-defined]
+        # The envelope is returned as a JSON string: the registry then emits a one-line output
+        # schema instead of repeating the full envelope schema for every tool.
+        wrapper.__signature__ = sig.replace(return_annotation=str)  # type: ignore[attr-defined]
         annotations = {p.name: p.annotation for p in sig.parameters.values()}
-        annotations['return'] = AgentToolResult
+        annotations['return'] = str
         wrapper.__annotations__ = annotations
         return toolset_registry.tool_call(wrapper)
 
@@ -179,9 +179,9 @@ def agent_tool(mutates: bool = False, allow_during_pie: bool | None = None,
 def confirmation_required(message: str, preview: Any, target: str = '') -> ToolError:
     """Builds the error returned by destructive tools called without confirm=True.
 
-    The preview (what would happen) is placed in details_json so the agent can
+    The preview (what would happen) is placed in details so the agent can
     show/decide, then call again with confirm=True.
     """
     return ToolError(Code.CONFIRMATION_REQUIRED, message, target,
-                     likely_causes=['Review details_json (dry-run preview), then call again with confirm=True.'],
+                     likely_causes=['Review details (dry-run preview), then call again with confirm=True.'],
                      retryable=True, details=preview)

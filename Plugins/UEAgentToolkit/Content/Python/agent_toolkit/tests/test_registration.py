@@ -23,6 +23,8 @@ class TestRegistration(unittest.TestCase):
             for tool in tools:
                 self.assertTrue(tool.get('description'), f"{tool.get('name')} has no description")
                 self.assertIn('inputSchema', tool)
+                out = tool.get('outputSchema', {}).get('properties', {}).get('returnValue', {})
+                self.assertEqual(out.get('type'), 'string', f"{tool['name']}: envelope must be a JSON string")
                 props = tool['inputSchema'].get('properties', {})
                 for pname, pschema in props.items():
                     if pschema.get('type') == 'array':

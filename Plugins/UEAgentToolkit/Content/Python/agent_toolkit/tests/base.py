@@ -22,7 +22,7 @@ def toolset_name(toolset_cls: type) -> str:
 
 def call_tool(toolset_cls: type, tool: str, **kwargs: Any) -> dict:
     """Executes a tool via the registry (JSON in / JSON out) and returns the envelope
-    with `details` parsed from details_json."""
+    (the tool's JSON string return value)."""
     name = toolset_name(toolset_cls)
     result = unreal.ToolsetRegistry.execute_tool(name, tool, json.dumps(kwargs))
     for _ in range(1000):
@@ -32,8 +32,7 @@ def call_tool(toolset_cls: type, tool: str, **kwargs: Any) -> dict:
         raise AssertionError(f'{name}.{tool} did not complete synchronously')
     if result.error:
         raise AssertionError(f'{name}.{tool} registry error: {result.error}')
-    envelope = json.loads(result.value)['returnValue']
-    envelope['details'] = json.loads(envelope.get('details_json') or '{}')
+    envelope = json.loads(json.loads(result.value)['returnValue'])
     return envelope
 
 

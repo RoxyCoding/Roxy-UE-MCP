@@ -1,12 +1,12 @@
 # UE Agent Toolkit — Tool 一覧 (自動生成)
 
 MCP では `call_tool(toolset_name="<Toolset>", tool_name="<tool>", arguments={...})` で呼び出します。
-全 Tool は `AgentToolResult`（success / errors[] / warnings[] / target / modified / dirtied_packages[] / details_json）を返します。
+全 Tool は JSON 文字列（success / errors[] / warnings[] / target / modified / dirtied_packages[] / details{}）を返します。
 合計 **195** Tools / 18 Toolsets
 
 ## `agent_toolkit.toolsets.inspector.InspectorTools` (16)
 
-Read-only inspection of editor, level, actors, assets, Blueprints, materials,     AI assets and project settings, returned as compact structured JSON (details_json).
+Read-only inspection of editor, level, actors, assets, Blueprints, materials,     AI assets and project settings, returned as compact structured JSON.
 
 | Tool | 説明 |
 |---|---|

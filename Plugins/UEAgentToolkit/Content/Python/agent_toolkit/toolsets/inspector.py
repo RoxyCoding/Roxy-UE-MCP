@@ -75,7 +75,7 @@ def _properties_json(obj: unreal.Object, names: list[str]) -> dict:
 @unreal.uclass()
 class InspectorTools(unreal.ToolsetDefinition):
     """Read-only inspection of editor, level, actors, assets, Blueprints, materials,
-    AI assets and project settings, returned as compact structured JSON (details_json)."""
+    AI assets and project settings, returned as compact structured JSON."""
 
     @agent_tool()
     def get_editor_state() -> dict:

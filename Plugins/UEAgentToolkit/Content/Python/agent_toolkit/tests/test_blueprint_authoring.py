@@ -60,7 +60,16 @@ class TestBlueprintAuthoring(ToolTestCase):
         self.assertOk(self.call('add_blueprint_component', asset_path=self.path, component_class='StaticMeshComponent',
                                 component_name='Hat', properties_json='{"static_mesh": "/Engine/BasicShapes/Cone", '
                                                                       '"relative_location": [0, 0, 90]}'))
-        comps = {c['name']: c for c in call_tool(InspectorTools, 'inspect_blueprint', asset_path=self.path)['details']['components']}
+        comp_list = call_tool(InspectorTools, 'inspect_blueprint', asset_path=self.path)['details']['components']
+        names = [c['name'] for c in comp_list]
+        self.assertEqual(len(names), len(set(names)), f'duplicate components: {names}')
+        comps = {c['name']: c for c in comp_list}
+        self.assertEqual(comps['Mesh'].get('object_name'), 'CharacterMesh0')
+        self.assertOk(self.call('set_blueprint_component_properties', asset_path=self.path, component_name='CharacterMesh0',
+                                properties_json='{"cast_shadow": false}'))
+        err = self.assertFails(self.call('set_blueprint_component_properties', asset_path=self.path,
+                                         component_name='NoSuchComp', properties_json='{}'), 'OBJECT_NOT_FOUND')
+        self.assertNotIn("'None'", err['likely_causes'][0])
         self.assertEqual(comps['FollowCamera']['parent'], 'CameraBoom')
         self.assertOk(self.call('set_blueprint_component_properties', asset_path=self.path,
                                 component_name='CharMoveComp' if 'CharMoveComp' in comps else 'CharacterMovement',
