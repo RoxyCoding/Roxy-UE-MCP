@@ -11,6 +11,13 @@
 #include "Engine/Blueprint.h"
 #include "IMessageLogListing.h"
 #include "K2Node_CustomEvent.h"
+#include "K2Node_Event.h"
+#include "K2Node_Variable.h"
+#include "Kismet/BlueprintFunctionLibrary.h"
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
+#include "UObject/UObjectIterator.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/CompilerResultsLog.h"
 #include "Kismet2/KismetEditorUtilities.h"
@@ -241,7 +248,7 @@ TArray<FString> UAgentToolkitNativeLibrary::GetKnownMessageLogNames()
 // ---------------------------------------------------------------- node pins / signatures
 namespace AgentToolkitNative
 {
-	static FString Error(const FString& Message)
+	static FString Fail(const FString& Message)
 	{
 		return TEXT("ERROR: ") + Message;
 	}
@@ -298,16 +305,16 @@ FString UAgentToolkitNativeLibrary::AddNodePin(UEdGraphNode* Node)
 	using namespace AgentToolkitNative;
 	if (!Node)
 	{
-		return Error(TEXT("Node is null"));
+		return Fail(TEXT("Node is null"));
 	}
 	IK2Node_AddPinInterface* AddPin = Cast<IK2Node_AddPinInterface>(Node);
 	if (!AddPin)
 	{
-		return Error(FString::Printf(TEXT("%s does not support adding pins"), *Node->GetClass()->GetName()));
+		return Fail(FString::Printf(TEXT("%s does not support adding pins"), *Node->GetClass()->GetName()));
 	}
 	if (!AddPin->CanAddPin())
 	{
-		return Error(TEXT("No more pins can be added to this node"));
+		return Fail(TEXT("No more pins can be added to this node"));
 	}
 	TSet<FName> Before;
 	for (UEdGraphPin* Pin : Node->Pins)
@@ -332,21 +339,21 @@ FString UAgentToolkitNativeLibrary::RemoveNodePin(UEdGraphNode* Node, FName PinN
 	using namespace AgentToolkitNative;
 	if (!Node)
 	{
-		return Error(TEXT("Node is null"));
+		return Fail(TEXT("Node is null"));
 	}
 	IK2Node_AddPinInterface* AddPin = Cast<IK2Node_AddPinInterface>(Node);
 	if (!AddPin)
 	{
-		return Error(FString::Printf(TEXT("%s does not support removing pins"), *Node->GetClass()->GetName()));
+		return Fail(FString::Printf(TEXT("%s does not support removing pins"), *Node->GetClass()->GetName()));
 	}
 	UEdGraphPin* Pin = Node->FindPin(PinName);
 	if (!Pin)
 	{
-		return Error(FString::Printf(TEXT("Pin %s not found"), *PinName.ToString()));
+		return Fail(FString::Printf(TEXT("Pin %s not found"), *PinName.ToString()));
 	}
 	if (!AddPin->CanRemovePin(Pin))
 	{
-		return Error(FString::Printf(TEXT("Pin %s cannot be removed"), *PinName.ToString()));
+		return Fail(FString::Printf(TEXT("Pin %s cannot be removed"), *PinName.ToString()));
 	}
 	Node->Modify();
 	AddPin->RemoveInputPin(Pin);
@@ -359,13 +366,13 @@ FString UAgentToolkitNativeLibrary::RetargetCallFunctionClass(UK2Node_CallFuncti
 	using namespace AgentToolkitNative;
 	if (!Node || !NewClass)
 	{
-		return Error(TEXT("Node and class are required"));
+		return Fail(TEXT("Node and class are required"));
 	}
 	const FName FunctionName = Node->FunctionReference.GetMemberName();
 	UFunction* Function = NewClass->FindFunctionByName(FunctionName);
 	if (!Function)
 	{
-		return Error(FString::Printf(TEXT("Function %s not found on %s"), *FunctionName.ToString(), *NewClass->GetName()));
+		return Fail(FString::Printf(TEXT("Function %s not found on %s"), *FunctionName.ToString(), *NewClass->GetName()));
 	}
 	Node->Modify();
 	Node->SetFromFunction(Function);
@@ -379,23 +386,23 @@ FString UAgentToolkitNativeLibrary::AddEventDispatcher(UBlueprint* Blueprint, FN
 	using namespace AgentToolkitNative;
 	if (!Blueprint || DispatcherName.IsNone())
 	{
-		return Error(TEXT("Blueprint and a dispatcher name are required"));
+		return Fail(TEXT("Blueprint and a dispatcher name are required"));
 	}
 	if (FBlueprintEditorUtils::FindNewVariableIndex(Blueprint, DispatcherName) != INDEX_NONE || FindSignatureGraph(Blueprint, DispatcherName))
 	{
-		return Error(FString::Printf(TEXT("%s already exists"), *DispatcherName.ToString()));
+		return Fail(FString::Printf(TEXT("%s already exists"), *DispatcherName.ToString()));
 	}
 	Blueprint->Modify();
 	FEdGraphPinType DelegateType;
 	DelegateType.PinCategory = UEdGraphSchema_K2::PC_MCDelegate;
 	if (!FBlueprintEditorUtils::AddMemberVariable(Blueprint, DispatcherName, DelegateType))
 	{
-		return Error(TEXT("Could not add the delegate variable"));
+		return Fail(TEXT("Could not add the delegate variable"));
 	}
 	UEdGraph* Graph = FBlueprintEditorUtils::CreateNewGraph(Blueprint, DispatcherName, UEdGraph::StaticClass(), UEdGraphSchema_K2::StaticClass());
 	if (!Graph)
 	{
-		return Error(TEXT("Could not create the signature graph"));
+		return Fail(TEXT("Could not create the signature graph"));
 	}
 	Graph->bEditable = false;
 	const UEdGraphSchema_K2* K2Schema = GetDefault<UEdGraphSchema_K2>();
@@ -414,19 +421,19 @@ FString UAgentToolkitNativeLibrary::AddGraphParam(UBlueprint* Blueprint, FName G
 	UEdGraph* Graph = Blueprint ? FindSignatureGraph(Blueprint, GraphName) : nullptr;
 	if (!Graph)
 	{
-		return Error(FString::Printf(TEXT("Function or dispatcher %s not found"), *GraphName.ToString()));
+		return Fail(FString::Printf(TEXT("Function or dispatcher %s not found"), *GraphName.ToString()));
 	}
 	const TArray<UK2Node_EditablePinBase*> Nodes = FindParamNodes(Graph, bOutput);
 	if (Nodes.IsEmpty())
 	{
-		return Error(bOutput ? TEXT("Graph has no output (Return) node; add a return node or an output via create_blueprint_function")
+		return Fail(bOutput ? TEXT("Graph has no output (Return) node; add a return node or an output via create_blueprint_function")
 							 : TEXT("Graph has no entry node"));
 	}
 	for (UK2Node_EditablePinBase* Node : Nodes)
 	{
 		if (Node->FindPin(ParamName))
 		{
-			return Error(FString::Printf(TEXT("Parameter %s already exists"), *ParamName.ToString()));
+			return Fail(FString::Printf(TEXT("Parameter %s already exists"), *ParamName.ToString()));
 		}
 	}
 	// Entry nodes expose inputs as output pins; result nodes take outputs as input pins.
@@ -436,7 +443,7 @@ FString UAgentToolkitNativeLibrary::AddGraphParam(UBlueprint* Blueprint, FName G
 		Node->Modify();
 		if (!Node->CreateUserDefinedPin(ParamName, PinType, Direction))
 		{
-			return Error(FString::Printf(TEXT("Could not add parameter %s"), *ParamName.ToString()));
+			return Fail(FString::Printf(TEXT("Could not add parameter %s"), *ParamName.ToString()));
 		}
 	}
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
@@ -449,7 +456,7 @@ FString UAgentToolkitNativeLibrary::RemoveGraphParam(UBlueprint* Blueprint, FNam
 	UEdGraph* Graph = Blueprint ? FindSignatureGraph(Blueprint, GraphName) : nullptr;
 	if (!Graph)
 	{
-		return Error(FString::Printf(TEXT("Function or dispatcher %s not found"), *GraphName.ToString()));
+		return Fail(FString::Printf(TEXT("Function or dispatcher %s not found"), *GraphName.ToString()));
 	}
 	bool bRemoved = false;
 	for (UK2Node_EditablePinBase* Node : FindParamNodes(Graph, bOutput))
@@ -463,7 +470,7 @@ FString UAgentToolkitNativeLibrary::RemoveGraphParam(UBlueprint* Blueprint, FNam
 	}
 	if (!bRemoved)
 	{
-		return Error(FString::Printf(TEXT("Parameter %s not found"), *ParamName.ToString()));
+		return Fail(FString::Printf(TEXT("Parameter %s not found"), *ParamName.ToString()));
 	}
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 	return FString();
@@ -479,14 +486,14 @@ FString UAgentToolkitNativeLibrary::SetCreateEventFunction(UK2Node_CreateDelegat
 	using namespace AgentToolkitNative;
 	if (!Node)
 	{
-		return Error(TEXT("Node is null"));
+		return Fail(TEXT("Node is null"));
 	}
 	Node->Modify();
 	Node->SetFunction(FunctionName);
 	Node->HandleAnyChange(true);
 	if (Node->GetFunctionName() != FunctionName)
 	{
-		return Error(FString::Printf(TEXT("Function %s is not compatible with this delegate"), *FunctionName.ToString()));
+		return Fail(FString::Printf(TEXT("Function %s is not compatible with this delegate"), *FunctionName.ToString()));
 	}
 	MarkModified(Node);
 	return FString();
@@ -537,4 +544,111 @@ TArray<FString> UAgentToolkitNativeLibrary::ListCompatibleEventFunctions(UK2Node
 		}
 	}
 	return Result;
+}
+
+FString UAgentToolkitNativeLibrary::GetNodeMemberName(UEdGraphNode* Node)
+{
+	if (const UK2Node_CustomEvent* Custom = Cast<UK2Node_CustomEvent>(Node))
+	{
+		return Custom->CustomFunctionName.ToString();
+	}
+	if (const UK2Node_Event* Event = Cast<UK2Node_Event>(Node))
+	{
+		return Event->EventReference.GetMemberName().ToString();
+	}
+	if (const UK2Node_CallFunction* Call = Cast<UK2Node_CallFunction>(Node))
+	{
+		const UFunction* Function = Call->GetTargetFunction();
+		return Function ? Function->GetOwnerClass()->GetName() + TEXT(":") + Function->GetName()
+						: Call->FunctionReference.GetMemberName().ToString();
+	}
+	if (const UK2Node_Variable* Variable = Cast<UK2Node_Variable>(Node))
+	{
+		return Variable->GetVarNameString();
+	}
+	return FString();
+}
+
+namespace AgentToolkitNative
+{
+	static FString Normalize(const FString& Text)
+	{
+		FString Out = Text.ToLower();
+		Out.ReplaceInline(TEXT(" "), TEXT(""));
+		Out.ReplaceInline(TEXT("_"), TEXT(""));
+		return Out;
+	}
+
+	static void AddMatches(UClass* Class, bool bIncludeSuper, const FString& Needle, int32 MaxResults,
+						   TSet<UFunction*>& Seen, TArray<TSharedPtr<FJsonValue>>& Out)
+	{
+		const EFieldIteratorFlags::SuperClassFlags Super = bIncludeSuper ? EFieldIteratorFlags::IncludeSuper : EFieldIteratorFlags::ExcludeSuper;
+		for (TFieldIterator<UFunction> It(Class, Super); It && Out.Num() < MaxResults; ++It)
+		{
+			UFunction* Function = *It;
+			if (Seen.Contains(Function) || !Function->HasAnyFunctionFlags(FUNC_BlueprintCallable | FUNC_BlueprintPure) ||
+				Function->HasMetaData(TEXT("BlueprintInternalUseOnly")) || Function->HasMetaData(TEXT("DeprecatedFunction")))
+			{
+				continue;
+			}
+			const FString DisplayName = Function->GetMetaData(TEXT("DisplayName"));
+			const FString Haystack = Normalize(Function->GetName() + TEXT("|") + DisplayName + TEXT("|") + Function->GetMetaData(TEXT("Keywords")));
+			if (!Haystack.Contains(Needle))
+			{
+				continue;
+			}
+			Seen.Add(Function);
+			TSharedRef<FJsonObject> F = MakeShared<FJsonObject>();
+			F->SetStringField(TEXT("id"), Function->GetOwnerClass()->GetName() + TEXT(":") + Function->GetName());
+			if (!DisplayName.IsEmpty()) { F->SetStringField(TEXT("display_name"), DisplayName); }
+			const FString Category = Function->GetMetaData(TEXT("Category"));
+			if (!Category.IsEmpty()) { F->SetStringField(TEXT("category"), Category); }
+			F->SetBoolField(TEXT("pure"), Function->HasAnyFunctionFlags(FUNC_BlueprintPure));
+			F->SetBoolField(TEXT("static"), Function->HasAnyFunctionFlags(FUNC_Static));
+			TArray<TSharedPtr<FJsonValue>> Params;
+			for (TFieldIterator<FProperty> P(Function); P && P->HasAnyPropertyFlags(CPF_Parm); ++P)
+			{
+				if (P->HasAnyPropertyFlags(CPF_ReturnParm))
+				{
+					F->SetStringField(TEXT("return"), P->GetCPPType());
+					continue;
+				}
+				const bool bOut = P->HasAnyPropertyFlags(CPF_OutParm) && !P->HasAnyPropertyFlags(CPF_ReferenceParm);
+				Params.Add(MakeShared<FJsonValueString>(FString::Printf(TEXT("%s%s %s"), bOut ? TEXT("out ") : TEXT(""), *P->GetCPPType(), *P->GetName())));
+			}
+			F->SetArrayField(TEXT("params"), Params);
+			Out.Add(MakeShared<FJsonValueObject>(F));
+		}
+	}
+}
+
+FString UAgentToolkitNativeLibrary::FindCallableFunctions(UClass* ContextClass, const FString& Query, int32 MaxResults)
+{
+	using namespace AgentToolkitNative;
+	const FString Needle = Normalize(Query);
+	const int32 Max = FMath::Max(1, MaxResults);
+	TArray<TSharedPtr<FJsonValue>> Out;
+	TSet<UFunction*> Seen;
+	if (!Needle.IsEmpty())
+	{
+		if (ContextClass)
+		{
+			AddMatches(ContextClass, true, Needle, Max, Seen, Out);
+		}
+		for (TObjectIterator<UClass> It; It && Out.Num() < Max; ++It)
+		{
+			UClass* Class = *It;
+			if (Class->IsChildOf(UBlueprintFunctionLibrary::StaticClass()) && Class != UBlueprintFunctionLibrary::StaticClass() &&
+				!Class->HasAnyClassFlags(CLASS_Deprecated | CLASS_NewerVersionExists) &&
+				!Class->GetName().StartsWith(TEXT("SKEL_")) && !Class->GetName().StartsWith(TEXT("REINST_")))
+			{
+				AddMatches(Class, false, Needle, Max, Seen, Out);
+			}
+		}
+	}
+	FString Text;
+	const TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
+		TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Text);
+	FJsonSerializer::Serialize(Out, Writer);
+	return Text;
 }

@@ -97,4 +97,31 @@ public:
 	/** JSON of last-frame timings (game/render/RHI/GPU ms), delta time, draw calls and primitives. */
 	UFUNCTION(BlueprintCallable, Category = "AgentToolkit|Performance")
 	static FString GetFrameStats();
+
+	/**
+	 * Sculpts the landscape's first edit layer with a circular brush (world units).
+	 * Mode: raise / lower (Strength = world units at the brush center), flatten (to TargetHeight
+	 * world Z, Strength 0..1 = blend), smooth (Strength 0..1). Falloff 0..1 = soft edge fraction.
+	 * Returns JSON {"vertices", "region", "min_z", "max_z"} or "ERROR: ...".
+	 */
+	UFUNCTION(BlueprintCallable, Category = "AgentToolkit|Landscape")
+	static FString LandscapeSculpt(ALandscapeProxy* Landscape, FVector Center, float Radius, float Falloff,
+		const FString& Mode, float Strength, float TargetHeight);
+
+	/**
+	 * Paints (Strength > 0) or erases (Strength < 0) a weight layer with a circular brush. Creates the
+	 * Layer Info asset in LayerInfoFolder and the target layer when missing.
+	 * Returns JSON {"vertices", "layer_info", "created_layer_info"} or "ERROR: ...".
+	 */
+	UFUNCTION(BlueprintCallable, Category = "AgentToolkit|Landscape")
+	static FString LandscapePaintLayer(ALandscapeProxy* Landscape, FName LayerName, FVector Center, float Radius,
+		float Falloff, float Strength, const FString& LayerInfoFolder);
+
+	/** Height (world Z) and, if LayerName is set, that layer's weight (0..1) at a world XY. JSON or "ERROR: ...". */
+	UFUNCTION(BlueprintCallable, Category = "AgentToolkit|Landscape")
+	static FString LandscapeSample(ALandscapeProxy* Landscape, FVector Location, FName LayerName);
+
+	/** Target (paint) layers of a landscape as JSON [{"name", "layer_info"}]. */
+	UFUNCTION(BlueprintCallable, Category = "AgentToolkit|Landscape")
+	static FString LandscapeListTargetLayers(ALandscapeProxy* Landscape);
 };

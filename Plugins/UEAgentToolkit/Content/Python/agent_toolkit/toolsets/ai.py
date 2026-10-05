@@ -46,6 +46,17 @@ def _describe_bt(bt: unreal.BehaviorTree) -> dict:
     return json.loads(native.check(lib.bt_describe_graph(bt), bt.get_path_name()))
 
 
+def _blackboard_compatible(main_bb, sub_bb) -> bool:
+    """Run Behavior needs the subtree's blackboard to be the main tree's blackboard or one of its parents."""
+    current, seen = main_bb, 0
+    while current is not None and seen < 32:
+        if current == sub_bb:
+            return True
+        current = current.get_editor_property('parent')
+        seen += 1
+    return False
+
+
 @unreal.uclass()
 class AITools(unreal.ToolsetDefinition):
     """AI authoring: Blackboard keys, Behavior Tree nodes/decorators/services with properties and
@@ -129,6 +140,35 @@ class AITools(unreal.ToolsetDefinition):
         node = native.check(lib.bt_add_node(bt, parent_node, cls, parent_output), bt.get_path_name())
         applied = _apply_bt_properties(bt, node, properties_json) if properties_json else []
         return {'node': node, 'class': cls.get_name(), 'properties_set': applied, 'tree': _describe_bt(bt)}
+
+    @agent_tool(mutates=True)
+    def add_bt_subtree(behavior_tree_path: str, subtree_path: str, parent_node: str = 'Root',
+                       parent_output: int = 0) -> dict:
+        """Adds a Run Behavior task that runs another Behavior Tree as a subtree (reusable AI logic,
+        e.g. a shared "Patrol" tree).
+
+        Args:
+            behavior_tree_path: BehaviorTree asset to edit.
+            subtree_path: BehaviorTree asset to run as the subtree (must not be the same tree).
+            parent_node: Composite node id (or "Root" is not allowed: the root needs a composite first).
+            parent_output: Parent output pin (SimpleParallel: 0 = main task, 1 = background).
+        """
+        bt = _bt(behavior_tree_path)
+        sub = resolve.load_asset(subtree_path, unreal.BehaviorTree)
+        if sub == bt:
+            raise ToolError(Code.INVALID_ARGUMENT, 'A Behavior Tree cannot run itself as a subtree')
+        lib = native.require_graph('Behavior Tree editing')
+        main_bb = bt.get_editor_property('blackboard_asset')
+        sub_bb = sub.get_editor_property('blackboard_asset')
+        if sub_bb is not None and main_bb is not None and not _blackboard_compatible(main_bb, sub_bb):
+            ctx().warn(f'Subtree blackboard {sub_bb.get_name()} is not {main_bb.get_name()} or one of its parents; '
+                       'the subtree will fail to run', 'BLACKBOARD_MISMATCH')
+        node = native.check(lib.bt_add_node(bt, parent_node, unreal.BTTask_RunBehavior.static_class(), parent_output),
+                            bt.get_path_name())
+        instance = lib.bt_get_node_instance(bt, node)
+        instance.set_editor_property('behavior_asset', sub)
+        native.check(lib.bt_update_asset(bt), bt.get_path_name())
+        return {'node': node, 'subtree': sub.get_outermost().get_name(), 'tree': _describe_bt(bt)}
 
     @agent_tool(mutates=True)
     def add_bt_subnode(behavior_tree_path: str, owner_node: str, node_class: str,

@@ -1,5 +1,7 @@
 #include "AgentToolkitGraphLibrary.h"
 
+#include "BehaviorTree/Tasks/BTTask_RunBehavior.h"
+
 #include "AIGraphTypes.h"
 #include "AssetToolsModule.h"
 #include "Animation/AnimInstance.h"
@@ -348,13 +350,17 @@ FString UAgentToolkitGraphLibrary::BTAddNode(UBehaviorTree* BehaviorTree, const 
 
 	Graph->Modify();
 	UBehaviorTreeGraphNode* NewNode = nullptr;
-	if (bSimpleParallel)
+	// Run Behavior (subtree) tasks use a dedicated graph node, like the editor's schema does.
+	const bool bSubtree = NodeClass->IsChildOf(UBTTask_RunBehavior::StaticClass());
+	if (bSimpleParallel || bSubtree)
 	{
-		// UBehaviorTreeGraphNode_SimpleParallel is not exported: create it through reflection.
-		UClass* GraphNodeClass = FindObject<UClass>(nullptr, TEXT("/Script/BehaviorTreeEditor.BehaviorTreeGraphNode_SimpleParallel"));
+		// These graph node classes are not exported: create them through reflection.
+		const TCHAR* GraphNodeClassPath = bSubtree ? TEXT("/Script/BehaviorTreeEditor.BehaviorTreeGraphNode_SubtreeTask")
+												   : TEXT("/Script/BehaviorTreeEditor.BehaviorTreeGraphNode_SimpleParallel");
+		UClass* GraphNodeClass = FindObject<UClass>(nullptr, GraphNodeClassPath);
 		if (!GraphNodeClass)
 		{
-			return Fail(TEXT("BehaviorTreeGraphNode_SimpleParallel class not found"));
+			return Fail(FString::Printf(TEXT("%s class not found"), GraphNodeClassPath));
 		}
 		UBehaviorTreeGraphNode* Node = NewObject<UBehaviorTreeGraphNode>(Graph, GraphNodeClass, NAME_None, RF_Transactional);
 		Node->ClassData = FGraphNodeClassData(NodeClass, FString());

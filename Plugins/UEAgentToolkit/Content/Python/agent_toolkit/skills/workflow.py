@@ -22,6 +22,9 @@ SELF-CORRECTION LOOP (Blueprints, Materials, Input)
   addresses used by connect/disconnect/set-default tools.
 - Node menu strings are localized to the editor language. Create nodes by function path
   ("Character:Jump"), event function ("ReceiveBeginPlay"), variable or macro name instead.
+  find_blueprint_node_types returns those function ids from English names ("Print String").
+- Build larger logic in one call with BlueprintGraphTools.build_blueprint_graph (JSON nodes +
+  "a.Pin->b.Pin" connections, all-or-nothing), then compile once.
 
 SAFETY
 - Wrap multi-step edits in begin_transaction/end_transaction so one undo reverts them.

@@ -26,6 +26,7 @@ from agent_toolkit.toolsets import safety
 from agent_toolkit.toolsets import umg
 from agent_toolkit.toolsets import validation
 from agent_toolkit.toolsets import world
+from agent_toolkit.toolsets import world_partition
 
 TOOLSET_CLASSES = [
     inspector.InspectorTools,
@@ -51,6 +52,7 @@ TOOLSET_CLASSES = [
     metasound.MetaSoundTools,
     model_import.ModelImportTools,
     world.WorldTools,
+    world_partition.WorldPartitionTools,
     packaging.PackagingTools,
 ]
 

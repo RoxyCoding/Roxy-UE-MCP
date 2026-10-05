@@ -8,6 +8,7 @@ with locale-independent, JSON-declared equivalents. Nodes are created with the s
 
 from __future__ import annotations
 
+import json
 from collections import deque
 
 import unreal
@@ -15,7 +16,7 @@ import unreal
 from agent_toolkit.core import bp as bpu
 from agent_toolkit.core import native, resolve
 from agent_toolkit.core.errors import Code, ToolError
-from agent_toolkit.core.serialize import parse_json_arg
+from agent_toolkit.core.serialize import parse_json_arg, split_csv
 from agent_toolkit.core.tooling import agent_tool, ctx
 from agent_toolkit.toolsets.blueprint_authoring import (BEL, _bp, _function_graph_editor, _graph_editor,
                                                         _require_var, create_node)
@@ -93,6 +94,7 @@ def _set_pin_value(pin, value) -> None:
     pin.set_pin_value(str(value).lower() if isinstance(value, bool) else str(value))
 
 
+@unreal.uclass()
 class BlueprintGraphTools(unreal.ToolsetDefinition):
     """Bulk Blueprint graph construction from a JSON declaration (build_blueprint_graph), node type
     discovery (find_blueprint_node_types / get_blueprint_node_type_pins), graph queries
@@ -197,28 +199,40 @@ class BlueprintGraphTools(unreal.ToolsetDefinition):
     @agent_tool()
     def find_blueprint_node_types(asset_path: str, query: str, category: str | None = None,
                                   graph_name: str | None = None, limit: int = 50) -> dict:
-        """Finds creatable node types (the editor's right-click menu) with category and title split out.
-        Use the result with add_blueprint_node(node_kind="action"), or prefer node_kind=function with a
-        class:function path when known. Confirm pins first with get_blueprint_node_type_pins.
+        """Finds creatable node types. Two result lists:
+        - functions: language-independent matches by English function name / display name / keywords
+          (spaces and case ignored) on this Blueprint's class and all function libraries. Use their "id"
+          with add_blueprint_node / build_blueprint_graph as kind=function, identifier=id.
+        - menu_actions: matches in the editor's right-click menu (titles are in the editor language),
+          usable with kind=action. Confirm pins first with get_blueprint_node_type_pins.
 
         Args:
             asset_path: Blueprint asset path.
-            query: Case-insensitive substring of the node title or path, e.g. "Set Actor Location".
-            category: Optional category prefix filter, e.g. "Math|Vector".
+            query: e.g. "Print String", "SetActorLocation", "random float".
+            category: Optional menu category prefix filter for menu_actions, e.g. "Math|Vector".
             graph_name: Graph name (default EventGraph).
-            limit: Maximum results.
+            limit: Maximum results per list.
         """
-        _, ed = _graph_editor(_bp(asset_path), graph_name)
+        bp = _bp(asset_path)
+        _, ed = _graph_editor(bp, graph_name)
+        functions = []
+        lib = native.library()
+        if lib is not None:
+            functions = json.loads(lib.find_callable_functions(bp.generated_class(), query, limit) or '[]')
+        else:
+            ctx().warn('UEAgentToolkitNative not loaded: only localized menu titles are searched', 'NATIVE_MISSING')
         q = query.lower()
+        q_compact = q.replace(' ', '')
         prefix = category.lower().strip() if category else ''
         out = []
         for action in ed.list_available_nodes([]) or []:
             low = action.lower()
-            if q not in low or (prefix and not low.startswith(prefix)):
+            if (q not in low and q_compact not in low.replace(' ', '')) or (prefix and not low.startswith(prefix)):
                 continue
             parts = [p.strip() for p in action.split('|')]
             out.append({'action': action, 'category': '|'.join(parts[:-1]), 'title': parts[-1]})
-        return {'total': len(out), 'types': out[:limit]}
+        return {'total': len(functions) + len(out), 'functions': functions, 'menu_actions': out[:limit],
+                'menu_total': len(out)}
 
     @agent_tool(mutates=True)
     def get_blueprint_node_type_pins(asset_path: str, node_kind: str, identifier: str | None = None,
@@ -315,19 +329,19 @@ class BlueprintGraphTools(unreal.ToolsetDefinition):
                 'nodes': [bpu.node_info(n, include_pins=False) for n in seen.values()], 'connections': edges}
 
     @agent_tool(mutates=True)
-    def arrange_blueprint_nodes(asset_path: str, graph_name: str | None = None, node_ids: list[str] | None = None,
+    def arrange_blueprint_nodes(asset_path: str, graph_name: str | None = None, node_ids: str | None = None,
                                 x_spacing: int = 360, y_spacing: int = 180) -> dict:
         """Auto-arranges nodes left to right by their distance from the graph's source nodes.
 
         Args:
             asset_path: Blueprint asset path.
             graph_name: Graph name (default EventGraph).
-            node_ids: Only arrange these nodes (default: the whole graph).
+            node_ids: Comma-separated node ids to arrange (default: the whole graph).
             x_spacing: Horizontal distance between columns.
             y_spacing: Vertical distance between rows.
         """
         graph = bpu.find_graph(_bp(asset_path), graph_name or '')
-        names = [bpu.find_node(graph, n).get_name() for n in node_ids] if node_ids else None
+        names = [bpu.find_node(graph, n).get_name() for n in split_csv(node_ids)] if node_ids else None
         arranged = _arrange(graph, names, x_spacing, y_spacing)
         return {'arranged': len(arranged), 'graph': graph.get_name()}
 
@@ -381,8 +395,9 @@ class BlueprintGraphTools(unreal.ToolsetDefinition):
             asset_path: Blueprint asset path.
         """
         bp = _bp(asset_path)
-        parent = bp.get_editor_property('parent_class')
-        return {'parent_class': parent.get_path_name() if parent else None}
+        parent = BEL.get_blueprint_parent_class(bp)
+        return {'parent_class': parent.get_path_name() if parent else None,
+                'parent_chain': resolve.class_parent_chain(parent) if parent else []}
 
     @agent_tool(mutates=True)
     def set_blueprint_parent(asset_path: str, parent_class: str) -> dict:
@@ -395,17 +410,63 @@ class BlueprintGraphTools(unreal.ToolsetDefinition):
         """
         bp = _bp(asset_path)
         new_parent = resolve.resolve_class(parent_class)
-        old = bp.get_editor_property('parent_class')
+        old = BEL.get_blueprint_parent_class(bp)
         if old == new_parent:
             return {'parent_class': new_parent.get_path_name(), 'changed': False}
         BEL.reparent_blueprint(bp, new_parent)
         BEL.compile_blueprint(bp)
-        now = bp.get_editor_property('parent_class')
+        now = BEL.get_blueprint_parent_class(bp)
         if now != new_parent:
             raise ToolError(Code.WRONG_TYPE, f'{new_parent.get_name()} is not a valid parent for this Blueprint',
                             target=bp.get_path_name())
         return {'previous': old.get_path_name() if old else None, 'parent_class': new_parent.get_path_name(),
                 'changed': True, 'status': bpu.status_name(bp)}
+
+    @agent_tool(mutates=True)
+    def remove_blueprint_function(asset_path: str, function_name: str) -> dict:
+        """Removes a function graph, macro graph or event dispatcher. Call nodes that used it become
+        errors, so check find_blueprint_nodes(text=function_name) and compile afterwards.
+
+        Args:
+            asset_path: Blueprint asset path.
+            function_name: Function, macro or event dispatcher name.
+        """
+        bp = _bp(asset_path)
+        dispatchers = [str(n) for n in BEL.list_event_dispatchers(bp) or []]
+        if function_name in dispatchers:
+            if not BEL.remove_event_dispatcher(bp, unreal.Name(function_name)):
+                raise ToolError(Code.UE_OPERATION_FAILED, f'Could not remove dispatcher {function_name!r}',
+                                target=bp.get_path_name())
+            return {'removed': function_name, 'kind': 'event_dispatcher'}
+        names = [g.get_name() for g in bpu.graphs(bp)]
+        if function_name not in names or function_name in ('EventGraph', 'UserConstructionScript'):
+            raise ToolError(Code.OBJECT_NOT_FOUND, f'Function/macro {function_name!r} not found', target=bp.get_path_name(),
+                            likely_causes=[f'Graphs: {names}; dispatchers: {dispatchers}',
+                                           'EventGraph and UserConstructionScript cannot be removed.'])
+        BEL.remove_function_graph(bp, function_name)
+        if function_name in [g.get_name() for g in bpu.graphs(bp)]:
+            raise ToolError(Code.UE_OPERATION_FAILED, f'Could not remove graph {function_name!r}', target=bp.get_path_name())
+        return {'removed': function_name, 'kind': 'graph'}
+
+    @agent_tool()
+    def list_component_events(asset_path: str, component_name: str) -> dict:
+        """Lists the bindable events of a component (e.g. OnComponentBeginOverlap), for
+        add_blueprint_node(node_kind="component_event", identifier="Component:Event").
+
+        Args:
+            asset_path: Blueprint asset path.
+            component_name: Component variable name (or object name, e.g. CharacterMesh0).
+        """
+        bp = _bp(asset_path)
+        _, data = bpu.find_subobject(bp, component_name)
+        template = unreal.SubobjectDataBlueprintFunctionLibrary.get_object_for_blueprint(data, bp)
+        if not isinstance(template, unreal.ActorComponent):
+            raise ToolError(Code.WRONG_TYPE, f'{component_name!r} is not a component', target=bp.get_path_name())
+        graph = BEL.find_event_graph(bp)
+        if graph is None:
+            raise ToolError(Code.NOT_SUPPORTED, 'This Blueprint has no event graph', target=bp.get_path_name())
+        events = sorted(str(e) for e in bpu.graph_editor(graph).list_component_events(template) or [])
+        return {'component': component_name, 'class': template.get_class().get_name(), 'events': events}
 
     # ------------------------------------------------- native-backed (UEAgentToolkitNative)
     @agent_tool(mutates=True)
@@ -554,5 +615,6 @@ class BlueprintGraphTools(unreal.ToolsetDefinition):
         if node.get_class().get_name() != 'K2Node_CreateDelegate':
             raise ToolError(Code.WRONG_TYPE, f'{node_id} is a {node.get_class().get_name()}, not a Create Event node')
         names = [str(n) for n in lib.list_compatible_event_functions(node) or []]
-        return {'node': node_id, 'candidates': names,
+        current = lib.get_create_event_function(node)
+        return {'node': node_id, 'current': '' if current.is_none() else str(current), 'candidates': names,
                 'note': 'Empty usually means the delegate pin is not connected yet.' if not names else ''}

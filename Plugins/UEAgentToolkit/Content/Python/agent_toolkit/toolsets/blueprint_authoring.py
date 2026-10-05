@@ -99,11 +99,12 @@ def _function_path(identifier: str) -> str:
 def _find_event_node(graph: unreal.EdGraph, identifier: str):
     """Existing K2Node_Event for an overridable event ("ReceiveTick" or "Tick"), or None."""
     wanted = {identifier.lower(), ('receive' + identifier).lower()}
+    lib = native.library()
     for node in bpu.graph_nodes(graph):
         if node.get_class().get_name() != 'K2Node_Event':
             continue
         try:
-            name = str(node.get_editor_property('event_reference').get_editor_property('member_name'))
+            name = str(lib.get_node_member_name(node)) if lib else                 str(node.get_editor_property('event_reference').get_editor_property('member_name'))
         except Exception:  # pylint: disable=broad-exception-caught
             continue
         if name.lower() in wanted:
@@ -137,7 +138,6 @@ def _function_graph_editor(bp: unreal.Blueprint, function_name: str):
     return graph, bpu.graph_editor(graph)
 
 
-@unreal.uclass()
 def create_node(bp: unreal.Blueprint, graph: unreal.EdGraph, ed, node_kind: str, identifier: str | None,
                 x: int = 0, y: int = 0):
     """Creates a node from (node_kind, identifier) as documented on add_blueprint_node.
@@ -205,6 +205,7 @@ def create_node(bp: unreal.Blueprint, graph: unreal.EdGraph, ed, node_kind: str,
     return node, True
 
 
+@unreal.uclass()
 class BlueprintAuthoringTools(unreal.ToolsetDefinition):
     """Blueprint editing: typed variables with defaults/replication, components (SCS),
     functions with typed signatures, custom events (incl. RPC), macros, interfaces, and

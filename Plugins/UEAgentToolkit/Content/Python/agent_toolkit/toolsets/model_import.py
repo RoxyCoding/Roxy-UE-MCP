@@ -464,6 +464,7 @@ def _import(source_file: str, folder: str, mesh_type: str, uniform_scale: float,
     return [str(p) for p in task.get_editor_property('imported_object_paths')]
 
 
+@unreal.uclass()
 class ModelImportTools(unreal.ToolsetDefinition):
     """Blender/DCC model import pipeline: one-call import with checks (import_blender_model), mesh
     checks for Blender export problems (inspect_imported_meshes), texture settings by name suffix

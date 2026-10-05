@@ -23,8 +23,8 @@ Plugins/
     Docs/TOOLS.md
   UEAgentToolkitNative/      ← 任意の C++ Editor プラグイン（Python API が無い機能のみ）
     Source/…                 ← Interface 実装, Macro, RPC/Replication Condition, Compiler/Message Log,
-                                Behavior Tree（Simple Parallel 含む）/ Blackboard / EQS 編集, AnimBP State Machine,
-                                Montage Section, BlendSpace, Sound Cue, MetaSound 部分編集, Landscape 作成, Widget Animation,
+                                Behavior Tree（Simple Parallel・Subtree 含む）/ Blackboard / EQS 編集, AnimBP State Machine,
+                                Montage Section, BlendSpace, Sound Cue, MetaSound 部分編集, Landscape 作成・スカルプト・レイヤーペイント, Widget Animation,
                                 汎用プロパティ設定（テキスト形式・ネストパス）, 実行時フレーム統計
     Binaries/Win64/          ← UE 5.8 Win64 ビルド済み
     build.sh
@@ -43,6 +43,13 @@ Native プラグインが無い場合でも Python 側は動作し、該当 Tool
    { "unreal-mcp": { "type": "http", "url": "http://127.0.0.1:8000/mcp" } }
    ```
 5. Native を再ビルドする場合（Editor を閉じて）: `Plugins/UEAgentToolkitNative/build.sh`
+6. （推奨）Epic の `BlueprintTools` を MCP から隠す。本 Toolkit の `BlueprintAuthoringTools` + `BlueprintGraphTools` が
+   上位互換（言語非依存のノード作成）なので、Agent が二者択一で迷わないようにします。エンジン改変は不要で、
+   `Config/DefaultEditorPerProjectUserSettings.ini` に追記するだけです（Editor 再起動で反映）:
+   ```ini
+   [/Script/ToolsetRegistry.ToolsetRegistrySettings]
+   +BlockedNames=/^editor_toolset\.toolsets\.blueprint\.BlueprintTools$/
+   ```
 
 ## Tool の返り値
 
@@ -88,13 +95,13 @@ MODE=cmd Plugins/UEAgentToolkit/Scripts/run_tests.sh   # Commandlet（Undo 等 E
 Plugins/UEAgentToolkit/Scripts/run_tests.sh "" test_inspector,test_assets
 ```
 Editor 内では Session Frontend の `AI.Toolsets.UEAgentToolkit` からも実行できます。
-現状: **75 tests / 全パス**（Tool 登録・Schema、正常系、無効 Asset、存在しない Object、Compile Error、Editor 状態、Undo/Redo、ロールバック）。
+現状: **89 tests / 全パス**（Tool 登録・Schema、正常系、無効 Asset、存在しない Object、Compile Error、Editor 状態、Undo/Redo、ロールバック）。
 
 ## Epic 公式 Toolset との分担（主なもの）
 
 | 用途 | 使う Toolset |
 |---|---|
-| Blueprint 作成・親変更・関数グラフ・Graph DSL | `editor_toolset…BlueprintTools`（作成）+ `BlueprintAuthoringTools`（型付き変数/コンポーネント/関数/RPC/Interface/名前指定のノード編集）+ `BlueprintGraphTools`（JSON によるグラフ一括構築、ノード種類/ピンの事前調査、ノード検索、接続範囲の取得、自動整列、変数削除、関数引数追加、親クラス変更、ネイティブ経由のピン増減/ノードクラス差し替え/Event Dispatcher/関数引数削除/Create Event 関数設定） |
+| Blueprint 作成・親変更・関数グラフ・Graph DSL | Epic `BlueprintTools` の全機能を置き換え（推奨設定で非表示）。作成は `AssetManagementTools.create_asset`、構造の読み取りは `InspectorTools.inspect_blueprint(_graph)`、コンパイルは `BuildDebugTools.compile_blueprint`、編集は `BlueprintAuthoringTools`（型付き変数/コンポーネント/関数/RPC/Interface/名前指定のノード編集）+ `BlueprintGraphTools`（JSON によるグラフ一括構築、ノード種類/ピンの事前調査、ノード検索、接続範囲の取得、自動整列、変数削除、関数引数追加、親クラス変更、関数/マクロ/Dispatcher 削除、コンポーネントのイベント一覧、言語非依存の関数検索（英語名・表示名・キーワード）、ネイティブ経由のピン増減/ノードクラス差し替え/Event Dispatcher/関数引数削除/Create Event 関数設定） |
 | Material Graph 基本操作 / Material Instance | `MaterialTools`, `MaterialInstanceTools` + `MaterialAuthoringTools`（パラメータ一括作成、設定、Compile Error） |
 | Widget / UMG | `UMGToolSet`, `MVVMToolset` + `UMGTools`（Canvas レイアウト、名前指定のプロパティ、Widget Animation） |
 | Niagara | `NiagaraToolset_System` など |
@@ -102,6 +109,8 @@ Editor 内では Session Frontend の `AI.Toolsets.UEAgentToolkit` からも実�
 | Automation / Functional Test | `AutomationTestToolset` |
 | Project Settings 任意セクション | `ConfigSettingsToolset` |
 | Static/Skeletal Mesh, DataTable, StringTable | `editor_toolset` 各 Toolset |
+| 地形 | `WorldTools`（Landscape 作成、スカルプト raise/lower/flatten/smooth（パス沿いで道や川も）、レイヤーペイント（Layer Info 自動作成）、高さ・ウェイトの読み取り、Foliage） |
+| World Partition | `WorldPartitionTools`（Data Layer の作成/アクター割り当て/初期ランタイム状態/エディタ表示/削除、アクターのストリーミング設定） |
 | Blender 等からのモデル取り込み | `ModelImportTools`（取り込み〜テクスチャ設定〜MI 自動生成・スロット割り当て〜命名〜点検を 1 回で。スケール/ピボット/Y-up/Armature ルートボーン/コリジョン等を検出） |
 | Live Coding | `LiveCodingToolset` |
 | Gameplay Tags / GAS / PCG / Physics Asset / Plugin | 各公式 Toolset |
@@ -115,7 +124,9 @@ Editor 内では Session Frontend の `AI.Toolsets.UEAgentToolkit` からも実�
 - MetaSound：新規は `build_metasound_source`（一括構築）、既存アセットは Native プラグイン経由でノード ID 指定の部分編集（`inspect_metasound` → `add_metasound_node` / `connect_metasound_pins` / `set_metasound_input_defaults` / `add_metasound_graph_input` など）。Native 無しでは部分編集不可。
 - EQS 編集はランタイムデータを直接編集し、エディタ用グラフは次回 EQS エディタを開いたときに再生成されます（ノード配置のみリセット）。
 - IK Retarget：テンプレートに一致しないスケルトンでは自動チェーン生成されません。チェーン未定義の IK Rig でのリターゲットはエンジンがアサートで落ちるため、ツール側で事前に拒否します。
-- Landscape のスカルプト／レイヤーペイント、Behavior Tree の Subtree ノード、Widget Animation の Event／Material トラックは未対応。
+- Landscape のスカルプト／ペイントは最初の Edit Layer に書き込みます。ペイントの見た目には、Landscape マテリアルに同名レイヤーの Landscape Layer Blend が必要です。
+- Data Layer / ストリーミング設定は World Partition レベルのみ（それ以外は `EDITOR_STATE`）。
+- Widget Animation の Event／Material トラック、EQS の配置を保ったままの部分編集、MetaSound のノード種類検索、IK Rig チェーンの手動定義は未対応。
 - Packaging は UAT を別プロセスで実行。保存されていない変更は含まれません（警告）。プラグインにランタイムコードがあるとコンテンツのみのプロジェクトでもコードビルドが走ります。
 - `add_mapping_context_to_blueprint` はシングルプレイ向け（`GetPlayerController(0)`）。マルチは `register_default_mapping_context` を推奨。
 - Commandlet モードでは Undo バッファ・アクターファクトリ・新規 Input Action のノードメニュー反映が無効（MCP 実運用の通常 Editor では有効）。

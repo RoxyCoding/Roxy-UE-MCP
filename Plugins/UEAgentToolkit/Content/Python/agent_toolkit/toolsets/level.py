@@ -140,7 +140,8 @@ class LevelTools(unreal.ToolsetDefinition):
             raise ToolError(Code.ALREADY_EXISTS, f'{package} already exists', target=package)
         dirty_maps = [p.get_name() for p in unreal.EditorLoadingAndSavingUtils.get_dirty_map_packages() or []]
         if dirty_maps and not confirm_discard_unsaved:
-            raise confirmation_required('The open level has unsaved changes that would be discarded.',
+            raise confirmation_required('The open level has unsaved changes that would be discarded '
+                                        '(save it first, or pass confirm_discard_unsaved=true).',
                                         {'dirty_levels': dirty_maps}, package)
         les = editor.level_subsystem()
         if template == 'empty':

@@ -55,7 +55,9 @@ class TestBlueprintGraph(ToolTestCase):
         self.assertEqual(self.assertOk(self.call('find_blueprint_nodes', asset_path=self.path,
                                                  class_name='CallFunction'))['total'], 0)
         types = self.assertOk(self.call('find_blueprint_node_types', asset_path=self.path, query='Print String'))
-        self.assertTrue(types['total'] > 0)
+        self.assertIn('KismetSystemLibrary:PrintString', [f['id'] for f in types['functions']])
+        own = self.assertOk(self.call('find_blueprint_node_types', asset_path=self.path, query='set actor location'))
+        self.assertIn('Actor:K2_SetActorLocation', [f['id'] for f in own['functions']])
         self.assertOk(self.call('find_blueprint_node_categories', asset_path=self.path))
 
     def test_variable_function_parent(self):
@@ -68,3 +70,24 @@ class TestBlueprintGraph(ToolTestCase):
         self.assertIn('Actor', parent['parent_class'])
         pawn = self.assertOk(self.call('set_blueprint_parent', asset_path=self.path, parent_class='Pawn'))
         self.assertTrue(pawn['changed'])
+        self.assertTrue(self.assertOk(self.call('get_blueprint_parent', asset_path=self.path))['parent_class'].endswith('.Pawn'))
+
+    def test_remove_function_and_component_events(self):
+        authoring = __import__('agent_toolkit.toolsets.blueprint_authoring', fromlist=['x']).BlueprintAuthoringTools
+        self.assertTrue(call_tool(authoring, 'create_blueprint_function', asset_path=self.path,
+                                  function_name='Temp')['success'])
+        self.assertOk(self.call('remove_blueprint_function', asset_path=self.path, function_name='Temp'))
+        self.assertFails(self.call('remove_blueprint_function', asset_path=self.path, function_name='Temp'),
+                         'OBJECT_NOT_FOUND')
+        self.assertFails(self.call('remove_blueprint_function', asset_path=self.path, function_name='EventGraph'),
+                         'OBJECT_NOT_FOUND')
+        self.assertTrue(call_tool(authoring, 'add_blueprint_component', asset_path=self.path, component_class='BoxComponent',
+                                  component_name='Trigger')['success'])
+        events = self.assertOk(self.call('list_component_events', asset_path=self.path, component_name='Trigger'))
+        self.assertIn('OnComponentBeginOverlap', events['events'])
+        spec = ('{"nodes": [{"id": "ov", "kind": "component_event", "identifier": "Trigger:OnComponentBeginOverlap"}, '
+                '{"id": "p", "kind": "function", "identifier": "KismetSystemLibrary:PrintString"}], '
+                '"connections": ["ov.then->p.execute"]}')
+        self.assertOk(self.build(graph_json=spec))
+        c = call_tool(BuildDebugTools, 'compile_blueprint', asset_path=self.path)
+        self.assertTrue(c['success'], c['errors'])

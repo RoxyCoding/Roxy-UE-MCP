@@ -18,6 +18,11 @@
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Landscape.h"
 #include "LandscapeInfo.h"
+#include "LandscapeDataAccess.h"
+#include "LandscapeEdit.h"
+#include "LandscapeEditLayer.h"
+#include "LandscapeLayerInfoObject.h"
+#include "LandscapeUtils.h"
 #include "Materials/MaterialInterface.h"
 #include "Misc/App.h"
 #include "Misc/FileHelper.h"
@@ -616,4 +621,265 @@ FString UAgentToolkitWorldLibrary::GetFrameStats()
 	Root->SetNumberField(TEXT("primitives_drawn"), GNumPrimitivesDrawnRHI[0]);
 	Root->SetBoolField(TEXT("rendering"), FApp::CanEverRender());
 	return ToJson(Root);
+}
+
+// =================================================================================== Landscape sculpt / paint
+
+namespace AgentToolkitLandscape
+{
+	static FString LandscapeFail(const FString& Message) { return TEXT("ERROR: ") + Message; }
+
+	static FString LandscapeJson(const TSharedRef<FJsonObject>& Object)
+	{
+		FString Text;
+		const TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
+			TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Text);
+		FJsonSerializer::Serialize(Object, Writer);
+		return Text;
+	}
+
+	/** Brush footprint in landscape vertex coordinates, clamped to the landscape extent. */
+	struct FBrush
+	{
+		ALandscape* Root = nullptr;
+		ULandscapeInfo* Info = nullptr;
+		FGuid LayerGuid;
+		FTransform ToWorld;
+		FVector2D LocalCenter = FVector2D::ZeroVector;
+		double RadiusQ = 0, InnerQ = 0;
+		int32 X1 = 0, Y1 = 0, X2 = -1, Y2 = -1;
+
+		int32 Width() const { return X2 - X1 + 1; }
+		int32 Height() const { return Y2 - Y1 + 1; }
+
+		double Weight(int32 X, int32 Y) const
+		{
+			const double D = FVector2D::Distance(FVector2D(X, Y), LocalCenter);
+			if (D > RadiusQ) { return 0.0; }
+			if (D <= InnerQ || RadiusQ <= InnerQ) { return 1.0; }
+			const double T = (RadiusQ - D) / (RadiusQ - InnerQ);
+			return T * T * (3.0 - 2.0 * T);
+		}
+	};
+
+	static FString MakeBrush(ALandscapeProxy* Proxy, const FVector& Center, float Radius, float Falloff, FBrush& Out)
+	{
+		if (!Proxy) { return LandscapeFail(TEXT("landscape is null")); }
+		Out.Root = Proxy->GetLandscapeActor();
+		Out.Info = Proxy->GetLandscapeInfo();
+		if (!Out.Root || !Out.Info) { return LandscapeFail(TEXT("landscape has no root actor / info (is it loaded?)")); }
+		if (const ULandscapeEditLayerBase* Layer = Out.Root->GetEditLayerConst(0))
+		{
+			Out.LayerGuid = Layer->GetGuid();
+		}
+		Out.ToWorld = Out.Root->LandscapeActorToWorld();
+		const FVector Local = Out.ToWorld.InverseTransformPosition(Center);
+		Out.LocalCenter = FVector2D(Local.X, Local.Y);
+		Out.RadiusQ = FMath::Max(0.5, Radius / FMath::Max((double)KINDA_SMALL_NUMBER, Out.ToWorld.GetScale3D().X));
+		Out.InnerQ = Out.RadiusQ * (1.0 - FMath::Clamp(Falloff, 0.f, 1.f));
+		int32 MinX, MinY, MaxX, MaxY;
+		if (!Out.Info->GetLandscapeExtent(MinX, MinY, MaxX, MaxY)) { return LandscapeFail(TEXT("landscape has no components")); }
+		Out.X1 = FMath::Max(MinX, FMath::FloorToInt(Local.X - Out.RadiusQ));
+		Out.Y1 = FMath::Max(MinY, FMath::FloorToInt(Local.Y - Out.RadiusQ));
+		Out.X2 = FMath::Min(MaxX, FMath::CeilToInt(Local.X + Out.RadiusQ));
+		Out.Y2 = FMath::Min(MaxY, FMath::CeilToInt(Local.Y + Out.RadiusQ));
+		if (Out.X1 > Out.X2 || Out.Y1 > Out.Y2) { return LandscapeFail(TEXT("brush is outside the landscape")); }
+		return FString();
+	}
+
+	static double TexToWorldZ(const FBrush& B, uint16 Tex)
+	{
+		return B.ToWorld.TransformPosition(FVector(0, 0, LandscapeDataAccess::GetLocalHeight(Tex))).Z;
+	}
+
+	static uint16 WorldZToTex(const FBrush& B, double WorldZ)
+	{
+		const FVector Origin = B.ToWorld.GetLocation();
+		const FVector Local = B.ToWorld.InverseTransformPosition(FVector(Origin.X, Origin.Y, WorldZ));
+		return (uint16)FMath::Clamp<int32>(FMath::RoundToInt(Local.Z / LANDSCAPE_ZSCALE + LandscapeDataAccess::MidValue), 0, 65535);
+	}
+}
+
+FString UAgentToolkitWorldLibrary::LandscapeSculpt(ALandscapeProxy* Landscape, FVector Center, float Radius, float Falloff,
+	const FString& Mode, float Strength, float TargetHeight)
+{
+	using namespace AgentToolkitLandscape;
+	const FString M = Mode.ToLower();
+	if (M != TEXT("raise") && M != TEXT("lower") && M != TEXT("flatten") && M != TEXT("smooth"))
+	{
+		return LandscapeFail(TEXT("mode must be raise, lower, flatten or smooth"));
+	}
+	FBrush B;
+	const FString Error = MakeBrush(Landscape, Center, Radius, Falloff, B);
+	if (!Error.IsEmpty()) { return Error; }
+
+	const int32 W = B.Width(), H = B.Height();
+	TArray<uint16> Data;
+	Data.SetNumZeroed(W * H);
+	int32 Vertices = 0;
+	double MinZ = TNumericLimits<double>::Max(), MaxZ = TNumericLimits<double>::Lowest();
+	{
+		ALandscape* Root = B.Root;
+		FScopedSetLandscapeEditingLayer Scope(Root, B.LayerGuid, [Root] { Root->RequestLayersContentUpdateForceAll(); });
+		FLandscapeEditDataInterface Edit(B.Info);
+		Edit.GetHeightDataFast(B.X1, B.Y1, B.X2, B.Y2, Data.GetData(), W);
+		const TArray<uint16> Original = Data;
+		const double ScaleZ = FMath::Max((double)KINDA_SMALL_NUMBER, B.ToWorld.GetScale3D().Z);
+		const double DeltaTex = Strength / ScaleZ / LANDSCAPE_ZSCALE;
+		const double Target = WorldZToTex(B, TargetHeight);
+		const double Blend = FMath::Clamp(Strength, 0.f, 1.f);
+		for (int32 Y = 0; Y < H; ++Y)
+		{
+			for (int32 X = 0; X < W; ++X)
+			{
+				const double Wt = B.Weight(B.X1 + X, B.Y1 + Y);
+				if (Wt <= 0.0) { continue; }
+				const double Old = Original[Y * W + X];
+				double New = Old;
+				if (M == TEXT("raise")) { New = Old + Wt * DeltaTex; }
+				else if (M == TEXT("lower")) { New = Old - Wt * DeltaTex; }
+				else if (M == TEXT("flatten")) { New = FMath::Lerp(Old, Target, Wt * Blend); }
+				else
+				{
+					double Sum = 0;
+					int32 Count = 0;
+					for (int32 DY = -1; DY <= 1; ++DY)
+					{
+						for (int32 DX = -1; DX <= 1; ++DX)
+						{
+							const int32 NX = X + DX, NY = Y + DY;
+							if (NX >= 0 && NX < W && NY >= 0 && NY < H) { Sum += Original[NY * W + NX]; ++Count; }
+						}
+					}
+					New = FMath::Lerp(Old, Sum / Count, Wt * Blend);
+				}
+				const uint16 Value = (uint16)FMath::Clamp<int32>(FMath::RoundToInt(New), 0, 65535);
+				Data[Y * W + X] = Value;
+				++Vertices;
+				const double Z = TexToWorldZ(B, Value);
+				MinZ = FMath::Min(MinZ, Z);
+				MaxZ = FMath::Max(MaxZ, Z);
+			}
+		}
+		Root->Modify();
+		Edit.SetHeightData(B.X1, B.Y1, B.X2, B.Y2, Data.GetData(), W, true);
+	}
+	TSharedRef<FJsonObject> Out = MakeShared<FJsonObject>();
+	Out->SetNumberField(TEXT("vertices"), Vertices);
+	Out->SetStringField(TEXT("region"), FString::Printf(TEXT("%d,%d,%d,%d"), B.X1, B.Y1, B.X2, B.Y2));
+	if (Vertices > 0)
+	{
+		Out->SetNumberField(TEXT("min_z"), MinZ);
+		Out->SetNumberField(TEXT("max_z"), MaxZ);
+	}
+	return LandscapeJson(Out);
+}
+
+FString UAgentToolkitWorldLibrary::LandscapePaintLayer(ALandscapeProxy* Landscape, FName LayerName, FVector Center, float Radius,
+	float Falloff, float Strength, const FString& LayerInfoFolder)
+{
+	using namespace AgentToolkitLandscape;
+	if (LayerName.IsNone()) { return LandscapeFail(TEXT("layer name is required")); }
+	FBrush B;
+	const FString Error = MakeBrush(Landscape, Center, Radius, Falloff, B);
+	if (!Error.IsEmpty()) { return Error; }
+
+	bool bCreated = false;
+	ULandscapeLayerInfoObject* LayerInfo = B.Info->GetLayerInfoByName(LayerName);
+	if (!LayerInfo)
+	{
+		const FString Folder = LayerInfoFolder.IsEmpty() ? FString(TEXT("/Game/Landscape/LayerInfos")) : LayerInfoFolder;
+		LayerInfo = UE::Landscape::CreateTargetLayerInfo(LayerName, Folder);
+		if (!LayerInfo) { return LandscapeFail(FString::Printf(TEXT("could not create a Layer Info asset in %s"), *Folder)); }
+		bCreated = true;
+	}
+	ALandscape* Root = B.Root;
+	if (!Root->HasTargetLayer(LayerInfo))
+	{
+		Root->Modify();
+		if (Root->HasTargetLayer(LayerName))
+		{
+			Root->UpdateTargetLayer(LayerName, FLandscapeTargetLayerSettings(LayerInfo));
+		}
+		else
+		{
+			Root->AddTargetLayer(LayerName, FLandscapeTargetLayerSettings(LayerInfo));
+		}
+		B.Info->UpdateLayerInfoMap(Root);
+	}
+
+	const int32 W = B.Width(), H = B.Height();
+	TArray<uint8> Data;
+	Data.SetNumZeroed(W * H);
+	int32 Vertices = 0;
+	{
+		FScopedSetLandscapeEditingLayer Scope(Root, B.LayerGuid, [Root] { Root->RequestLayersContentUpdateForceAll(); });
+		FLandscapeEditDataInterface Edit(B.Info);
+		Edit.GetWeightDataFast(LayerInfo, B.X1, B.Y1, B.X2, B.Y2, Data.GetData(), W);
+		const double Amount = FMath::Clamp(Strength, -1.f, 1.f) * 255.0;
+		for (int32 Y = 0; Y < H; ++Y)
+		{
+			for (int32 X = 0; X < W; ++X)
+			{
+				const double Wt = B.Weight(B.X1 + X, B.Y1 + Y);
+				if (Wt <= 0.0) { continue; }
+				uint8& V = Data[Y * W + X];
+				V = (uint8)FMath::Clamp<int32>(FMath::RoundToInt(V + Wt * Amount), 0, 255);
+				++Vertices;
+			}
+		}
+		Edit.SetAlphaData(LayerInfo, B.X1, B.Y1, B.X2, B.Y2, Data.GetData(), W);
+	}
+	TSharedRef<FJsonObject> Out = MakeShared<FJsonObject>();
+	Out->SetNumberField(TEXT("vertices"), Vertices);
+	Out->SetStringField(TEXT("layer_info"), LayerInfo->GetPathName());
+	Out->SetBoolField(TEXT("created_layer_info"), bCreated);
+	return LandscapeJson(Out);
+}
+
+FString UAgentToolkitWorldLibrary::LandscapeSample(ALandscapeProxy* Landscape, FVector Location, FName LayerName)
+{
+	using namespace AgentToolkitLandscape;
+	FBrush B;
+	const FString Error = MakeBrush(Landscape, Location, 0.5f, 0.f, B);
+	if (!Error.IsEmpty()) { return Error; }
+	const int32 X = FMath::Clamp(FMath::RoundToInt(B.LocalCenter.X), B.X1, B.X2);
+	const int32 Y = FMath::Clamp(FMath::RoundToInt(B.LocalCenter.Y), B.Y1, B.Y2);
+	TSharedRef<FJsonObject> Out = MakeShared<FJsonObject>();
+	FScopedSetLandscapeEditingLayer Scope(B.Root, B.LayerGuid);
+	FLandscapeEditDataInterface Edit(B.Info);
+	uint16 Height = 0;
+	Edit.GetHeightDataFast(X, Y, X, Y, &Height, 1);
+	Out->SetNumberField(TEXT("z"), TexToWorldZ(B, Height));
+	Out->SetStringField(TEXT("vertex"), FString::Printf(TEXT("%d,%d"), X, Y));
+	if (!LayerName.IsNone())
+	{
+		ULandscapeLayerInfoObject* LayerInfo = B.Info->GetLayerInfoByName(LayerName);
+		if (!LayerInfo) { return LandscapeFail(FString::Printf(TEXT("layer %s not found"), *LayerName.ToString())); }
+		uint8 Weight = 0;
+		Edit.GetWeightDataFast(LayerInfo, X, Y, X, Y, &Weight, 1);
+		Out->SetNumberField(TEXT("weight"), Weight / 255.0);
+	}
+	return LandscapeJson(Out);
+}
+
+FString UAgentToolkitWorldLibrary::LandscapeListTargetLayers(ALandscapeProxy* Landscape)
+{
+	TArray<TSharedPtr<FJsonValue>> Layers;
+	if (Landscape)
+	{
+		const ALandscapeProxy* Source = Landscape->GetLandscapeActor() ? static_cast<ALandscapeProxy*>(Landscape->GetLandscapeActor()) : Landscape;
+		for (const TPair<FName, FLandscapeTargetLayerSettings>& Pair : Source->GetTargetLayers())
+		{
+			TSharedRef<FJsonObject> L = MakeShared<FJsonObject>();
+			L->SetStringField(TEXT("name"), Pair.Key.ToString());
+			L->SetStringField(TEXT("layer_info"), Pair.Value.LayerInfoObj ? Pair.Value.LayerInfoObj->GetPathName() : FString());
+			Layers.Add(MakeShared<FJsonValueObject>(L));
+		}
+	}
+	FString Text;
+	const TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
+		TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Text);
+	FJsonSerializer::Serialize(Layers, Writer);
+	return Text;
 }

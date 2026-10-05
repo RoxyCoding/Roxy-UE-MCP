@@ -113,4 +113,19 @@ public:
 	/** Assigns a function (on the node's target object class) to a Create Event node. */
 	UFUNCTION(BlueprintCallable, Category = "AgentToolkit|Blueprint")
 	static FString SetCreateEventFunction(UK2Node_CreateDelegate* Node, FName FunctionName);
+
+	/**
+	 * Member a node refers to, language independent: event / custom event function name,
+	 * called function ("Class:Function"), or variable name. Empty for other nodes.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "AgentToolkit|Blueprint")
+	static FString GetNodeMemberName(UEdGraphNode* Node);
+
+	/**
+	 * Finds Blueprint-callable functions by English name/display name/keywords (case, spaces and
+	 * underscores ignored) on ContextClass (with super classes) and every Blueprint Function Library.
+	 * Returns JSON [{"id": "Class:Function", "display_name", "category", "pure", "static", "params", "return"}].
+	 */
+	UFUNCTION(BlueprintCallable, Category = "AgentToolkit|Blueprint")
+	static FString FindCallableFunctions(UClass* ContextClass, const FString& Query, int32 MaxResults);
 };

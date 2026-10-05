@@ -39,6 +39,39 @@ def _find_landscape(name: str | None):
                     likely_causes=[f'Landscapes: {[a.get_actor_label() for a in items]}'])
 
 
+def _world_lib():
+    native.require_graph('Landscape editing')
+    return unreal.AgentToolkitWorldLibrary
+
+
+def _brush_points(center: list[float], path_json: str | None, radius: float) -> list[tuple[float, float]]:
+    """Brush stamp positions: the center, plus points every radius/2 along an optional polyline."""
+    center = list(center or [])
+    if len(center) < 2:
+        raise ToolError(Code.INVALID_ARGUMENT, 'center must be [x, y]')
+    pts = [(float(center[0]), float(center[1]))]
+    for p in parse_json_arg(path_json, 'path_json', list) if path_json else []:
+        if not isinstance(p, (list, tuple)) or len(p) < 2:
+            raise ToolError(Code.INVALID_ARGUMENT, 'path_json must be [[x, y], ...]')
+        pts.append((float(p[0]), float(p[1])))
+    step = max(radius / 2.0, 1.0)
+    stamps = [pts[0]]
+    for (ax, ay), (bx, by) in zip(pts, pts[1:]):
+        n = max(1, int(math.ceil(math.hypot(bx - ax, by - ay) / step)))
+        stamps += [(ax + (bx - ax) * i / n, ay + (by - ay) * i / n) for i in range(1, n + 1)]
+    if len(stamps) > 2000:
+        raise ToolError(Code.INVALID_ARGUMENT, f'Path needs {len(stamps)} brush stamps (max 2000); use a larger radius')
+    return stamps
+
+
+def _sample(lib, target, point, layer_name: str | None = None) -> dict:
+    if not isinstance(point, (list, tuple)) or len(point) < 2:
+        raise ToolError(Code.INVALID_ARGUMENT, 'points must be [x, y]')
+    raw = native.check(lib.landscape_sample(target, unreal.Vector(float(point[0]), float(point[1]), 0),
+                                            unreal.Name(layer_name or 'None')), target.get_actor_label())
+    return json.loads(raw)
+
+
 def _ground_z(world, x: float, y: float, top: float, bottom: float) -> tuple[float, unreal.Vector] | None:
     hit = unreal.SystemLibrary.line_trace_single(world, unreal.Vector(x, y, top), unreal.Vector(x, y, bottom),
                                                  unreal.TraceTypeQuery.TRACE_TYPE_QUERY1, True, [],
@@ -126,6 +159,102 @@ class WorldTools(unreal.ToolsetDefinition):
         land.set_editor_property('landscape_material', mat)
         ctx().set_target(land.get_path_name())
         return {'landscape': land.get_actor_label(), 'material': mat.get_path_name()}
+
+    @agent_tool(mutates=True)
+    def sculpt_landscape(center: list[float], radius: float, mode: str = 'raise', strength: float = 100.0,
+                         falloff: float = 0.5, target_height: float | None = None, path_json: str | None = None,
+                         landscape: str | None = None) -> dict:
+        """Sculpts the landscape with a circular brush (world units): raise/lower hills, flatten a plateau
+        or road, smooth bumps. With path_json the brush is stamped along a polyline (roads, rivers).
+
+        Args:
+            center: [x, y] world position of the brush (z ignored). With path_json, the first point.
+            radius: Brush radius in world units (cm).
+            mode: raise, lower, flatten or smooth.
+            strength: raise/lower: height change in world units at the brush center. flatten/smooth: 0..1 blend.
+            falloff: 0..1 soft edge (0 = hard edge, 1 = fully soft).
+            target_height: flatten: world Z to flatten to (default: the height at the first brush point).
+            path_json: Optional [[x, y], ...] further points; brush stamps every radius/2 along the path.
+            landscape: Landscape label (default: the first landscape).
+        """
+        lib = _world_lib()
+        target = _find_landscape(landscape)
+        mode = mode.lower()
+        if mode not in ('raise', 'lower', 'flatten', 'smooth'):
+            raise ToolError(Code.INVALID_ARGUMENT, 'mode must be raise, lower, flatten or smooth')
+        if radius <= 0:
+            raise ToolError(Code.INVALID_ARGUMENT, 'radius must be > 0')
+        points = _brush_points(center, path_json, radius)
+        if mode == 'flatten' and target_height is None:
+            target_height = _sample(lib, target, points[0])['z']
+            ctx().warn(f'target_height not given: flattening to {target_height:.1f} (height at the first point)',
+                       'TARGET_HEIGHT_DEFAULTED')
+        if mode in ('flatten', 'smooth') and not 0 < strength <= 1:
+            strength = 1.0
+        stamps = []
+        for x, y in points:
+            stamps.append(native.check(lib.landscape_sculpt(target, unreal.Vector(x, y, 0), radius, falloff, mode,
+                                                            strength, target_height or 0.0), target.get_actor_label()))
+        out = [json.loads(s) for s in stamps]
+        zs = [s for s in out if 'min_z' in s]
+        return {'landscape': target.get_actor_label(), 'mode': mode, 'stamps': len(out),
+                'vertices': sum(s['vertices'] for s in out),
+                'min_z': min((s['min_z'] for s in zs), default=None), 'max_z': max((s['max_z'] for s in zs), default=None)}
+
+    @agent_tool(mutates=True)
+    def paint_landscape_layer(layer_name: str, center: list[float], radius: float, strength: float = 1.0,
+                              falloff: float = 0.5, path_json: str | None = None,
+                              layer_info_folder: str = '/Game/Landscape/LayerInfos',
+                              landscape: str | None = None) -> dict:
+        """Paints a landscape material layer (grass, rock, sand...) with a circular brush. Creates the
+        Layer Info asset and target layer when missing. The landscape material must contain a
+        Landscape Layer Blend with the same layer name for the paint to be visible.
+
+        Args:
+            layer_name: Layer name as used in the landscape material, e.g. "Grass".
+            center: [x, y] world position of the brush.
+            radius: Brush radius in world units.
+            strength: 0..1 paint amount at the center; negative values erase.
+            falloff: 0..1 soft edge.
+            path_json: Optional [[x, y], ...] further points to paint along.
+            layer_info_folder: Content folder for new Layer Info assets.
+            landscape: Landscape label (default: the first landscape).
+        """
+        lib = _world_lib()
+        target = _find_landscape(landscape)
+        if radius <= 0 or not -1 <= strength <= 1 or strength == 0:
+            raise ToolError(Code.INVALID_ARGUMENT, 'radius must be > 0 and strength in -1..1 (not 0)')
+        out = []
+        for x, y in _brush_points(center, path_json, radius):
+            out.append(json.loads(native.check(lib.landscape_paint_layer(
+                target, unreal.Name(layer_name), unreal.Vector(x, y, 0), radius, falloff, strength,
+                layer_info_folder), target.get_actor_label())))
+        material = target.get_editor_property('landscape_material')
+        if material is None:
+            ctx().warn('The landscape has no material: painted weights are stored but not visible', 'NO_MATERIAL')
+        return {'landscape': target.get_actor_label(), 'layer': layer_name, 'layer_info': out[0]['layer_info'],
+                'created_layer_info': any(o['created_layer_info'] for o in out), 'stamps': len(out),
+                'vertices': sum(o['vertices'] for o in out)}
+
+    @agent_tool()
+    def sample_landscape(points_json: str, layer_name: str | None = None, landscape: str | None = None) -> dict:
+        """Reads the landscape height (world Z) and optionally a paint layer weight (0..1) at points.
+
+        Args:
+            points_json: [[x, y], ...] world positions.
+            layer_name: Optional paint layer to read.
+            landscape: Landscape label (default: the first landscape).
+        """
+        lib = _world_lib()
+        target = _find_landscape(landscape)
+        points = parse_json_arg(points_json, 'points_json', list)
+        samples = []
+        for p in points[:500]:
+            s = _sample(lib, target, p, layer_name)
+            s['point'] = list(p)[:2]
+            samples.append(s)
+        return {'landscape': target.get_actor_label(), 'samples': samples,
+                'layers': json.loads(lib.landscape_list_target_layers(target) or '[]')}
 
     @agent_tool(mutates=True)
     def create_foliage_type(asset_path: str, mesh_path: str, density: float = 100.0, scale_min: float = 0.8,

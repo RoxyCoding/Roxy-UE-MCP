@@ -1,6 +1,7 @@
 """Every toolset is registered and every tool returns the standard envelope schema."""
 
 import json
+import os
 import unittest
 
 import unreal
@@ -14,6 +15,19 @@ class TestRegistration(unittest.TestCase):
     def test_all_toolsets_registered(self):
         for cls in TOOLSET_CLASSES:
             self.assertTrue(unreal.ToolsetRegistry.is_toolset_registered(toolset_name(cls)), toolset_name(cls))
+
+    def test_superseded_epic_blueprint_tools_hidden(self):
+        ini = os.path.join(unreal.Paths.project_config_dir(), 'DefaultEditorPerProjectUserSettings.ini')
+        text = open(ini, encoding='utf-8').read() if os.path.exists(ini) else ''
+        if 'editor_toolset\.toolsets\.blueprint\.BlueprintTools' not in text:
+            self.skipTest('BlueprintTools is not blocked in this project')
+        result = unreal.ToolsetRegistry.execute_tool('editor_toolset.toolsets.blueprint.BlueprintTools',
+                                                     'list_graphs', '{}')
+        self.assertTrue(result.error, 'blocked BlueprintTools still executed')
+        self.assertIn('Toolset', str(result.error))
+        other = unreal.ToolsetRegistry.execute_tool('agent_toolkit.toolsets.inspector.InspectorTools',
+                                                    'get_editor_state', '{}')
+        self.assertFalse(other.error, other.error)
 
     def test_schemas_have_tools_with_descriptions(self):
         for cls in TOOLSET_CLASSES:
