@@ -1,0 +1,890 @@
+[
+ {
+  "toolset": "agent_toolkit.toolsets.inspector.InspectorTools",
+  "description": "Read-only inspection of editor, level, actors, assets, Blueprints, materials,\n    AI assets and project settings, returned as compact structured JSON (details_json).",
+  "tools": [
+   {
+    "name": "get_class_hierarchy",
+    "description": "Returns the parent chain of a class and (optionally) its native and Blueprint subclasses."
+   },
+   {
+    "name": "get_asset_referencers",
+    "description": "Returns which assets reference an asset (hard + soft), as a tree up to `depth` levels."
+   },
+   {
+    "name": "get_asset_dependencies",
+    "description": "Returns what an asset depends on (hard + soft), as a tree up to `depth` levels,"
+   },
+   {
+    "name": "inspect_project_settings",
+    "description": "Returns key project settings: project file/name, engine version, Maps & Modes"
+   },
+   {
+    "name": "inspect_world_settings",
+    "description": "Returns the current level's World Settings: game mode override, kill Z, gravity,"
+   },
+   {
+    "name": "inspect_level",
+    "description": "Returns a summary of the currently loaded level: actor counts by class, gameplay"
+   },
+   {
+    "name": "inspect_skeleton",
+    "description": "Returns the bone hierarchy (name, parent) and sockets of a Skeleton or Skeletal Mesh."
+   },
+   {
+    "name": "inspect_blackboard",
+    "description": "Returns Blackboard keys (name, key type, base class/enum, instance synced) and parent."
+   },
+   {
+    "name": "inspect_behavior_tree",
+    "description": "Returns a Behavior Tree as a nested structure: composites, tasks, decorators and"
+   },
+   {
+    "name": "inspect_material",
+    "description": "Returns a Material or Material Instance as structured data: domain, blend mode,"
+   },
+   {
+    "name": "inspect_blueprint_graph",
+    "description": "Returns a Blueprint graph as structured data: nodes (id, title, class, position,"
+   },
+   {
+    "name": "inspect_blueprint",
+    "description": "Returns the full structure of a Blueprint without reading graphs node-by-node:"
+   },
+   {
+    "name": "inspect_asset",
+    "description": "Returns asset metadata: class, package, on-disk file and size, dirty state,"
+   },
+   {
+    "name": "inspect_component",
+    "description": "Returns details of one component on a level actor, optionally with reflected properties."
+   },
+   {
+    "name": "inspect_actor",
+    "description": "Returns a structured description of a level actor: class (and Blueprint),"
+   },
+   {
+    "name": "get_editor_state",
+    "description": "Returns a one-call overview of the editor: project, engine version, current"
+   }
+  ]
+ },
+ {
+  "toolset": "agent_toolkit.toolsets.assets.AssetManagementTools",
+  "description": "Asset lifecycle tools with safety rails: search, generic create, rename/move with\n    reference fix-up, guarded deletion with backups, import/reimport/export, redirector\n    detection/fix-up and unused asset detection.",
+  "tools": [
+   {
+    "name": "find_unused_assets",
+    "description": "Finds assets that no other asset references (candidates for cleanup). Levels and"
+   },
+   {
+    "name": "fix_redirectors",
+    "description": "Fixes up redirectors: re-saves every referencer so it points at the real asset, then"
+   },
+   {
+    "name": "find_redirectors",
+    "description": "Lists ObjectRedirector assets (left by renames/moves) and their referencers."
+   },
+   {
+    "name": "export_assets",
+    "description": "Exports assets to files on disk using their default exporters (e.g. FBX, PNG, T3D)."
+   },
+   {
+    "name": "reimport_assets",
+    "description": "Reimports assets from their original source files (meshes, textures, audio, tables)."
+   },
+   {
+    "name": "import_fbx",
+    "description": "Imports an FBX with explicit options (legacy FBX importer)."
+   },
+   {
+    "name": "import_files",
+    "description": "Imports files from disk (FBX/OBJ/glTF meshes, PNG/TGA/EXR textures, WAV/OGG audio,"
+   },
+   {
+    "name": "save_dirty_assets",
+    "description": "Saves all unsaved (dirty) packages (\"Save All\"), optionally limited to a folder."
+   },
+   {
+    "name": "delete_assets",
+    "description": "Deletes assets safely. Without confirm=True this is a dry run that returns, for each"
+   },
+   {
+    "name": "move_assets",
+    "description": "Moves assets to another folder, fixing up references (redirectors may remain)."
+   },
+   {
+    "name": "rename_asset",
+    "description": "Renames an asset in place and fixes up references (a redirector may be left behind;"
+   },
+   {
+    "name": "create_asset",
+    "description": "Creates a new asset of any class that has a \"create new\" factory (Blueprint,"
+   },
+   {
+    "name": "search_assets",
+    "description": "Searches the asset registry by name substring, class and folder."
+   }
+  ]
+ },
+ {
+  "toolset": "agent_toolkit.toolsets.level.LevelTools",
+  "description": "Level creation/saving, actor spawning (generic + light/camera/volume/PlayerStart helpers),\n    duplication/deletion, attachment, World Settings, GameMode and default maps, level\n    streaming and folder organisation. All actor edits are undoable.",
+  "tools": [
+   {
+    "name": "organize_actors_into_folders",
+    "description": "Organises Outliner folders automatically."
+   },
+   {
+    "name": "set_streaming_level_visibility",
+    "description": "Shows or hides a sublevel in the editor."
+   },
+   {
+    "name": "remove_streaming_level",
+    "description": "Removes a streaming sublevel from the current persistent level (the asset is kept)."
+   },
+   {
+    "name": "add_streaming_level",
+    "description": "Adds an existing level as a streaming sublevel of the current persistent level."
+   },
+   {
+    "name": "set_project_maps_and_modes",
+    "description": "Sets project-wide Maps & Modes (Config/DefaultEngine.ini, backed up first) and applies"
+   },
+   {
+    "name": "set_level_game_mode_override",
+    "description": "Sets (or clears) the GameMode override of the current level (World Settings)."
+   },
+   {
+    "name": "set_world_settings",
+    "description": "Sets World Settings properties of the current level, e.g."
+   },
+   {
+    "name": "detach_actor",
+    "description": "Detaches an actor from its parent, keeping its world transform."
+   },
+   {
+    "name": "attach_actor",
+    "description": "Attaches one actor to another (optionally to a socket/bone on the parent's root)."
+   },
+   {
+    "name": "delete_actors",
+    "description": "Deletes level actors (undoable with SafetyTools.undo). Without confirm=True only"
+   },
+   {
+    "name": "duplicate_actors",
+    "description": "Duplicates actors with a location offset."
+   },
+   {
+    "name": "add_player_start",
+    "description": "Adds a PlayerStart (player spawn point)."
+   },
+   {
+    "name": "add_volume",
+    "description": "Adds a volume or trigger sized by its half-extent."
+   },
+   {
+    "name": "add_camera",
+    "description": "Adds a camera actor (CameraActor or CineCameraActor)."
+   },
+   {
+    "name": "add_light",
+    "description": "Adds a light actor."
+   },
+   {
+    "name": "spawn_actor",
+    "description": "Spawns an actor from a class (e.g. \"PointLight\", \"/Game/BP/BP_Enemy\") or from an"
+   },
+   {
+    "name": "save_current_level",
+    "description": "Saves the currently open level (and its external actors). Untitled levels need save_as_path."
+   },
+   {
+    "name": "create_level",
+    "description": "Creates a new level asset and opens it. The current level is closed without saving,"
+   }
+  ]
+ },
+ {
+  "toolset": "agent_toolkit.toolsets.build_debug.BuildDebugTools",
+  "description": "Compile Blueprints with structured error reports, launch/poll C++ builds, read and\n    search the Output Log by severity since a mark, extract runtime errors and\n    asserts/ensures, and trace error text back to assets.",
+  "tools": [
+   {
+    "name": "resolve_error_context",
+    "description": "Traces an error message back to project content: extracts asset paths and Blueprint"
+   },
+   {
+    "name": "get_message_log",
+    "description": "Returns messages from an editor Message Log listing (BlueprintLog, MapCheck, PIE,"
+   },
+   {
+    "name": "get_asserts_and_ensures",
+    "description": "Returns assertion failures, ensures and crashes recorded in the log, each with its"
+   },
+   {
+    "name": "get_runtime_errors",
+    "description": "Extracts Blueprint/script runtime errors (Accessed None, Blueprint Runtime Error,"
+   },
+   {
+    "name": "clear_log",
+    "description": "Sets a log mark at the current end of the Output Log. Subsequent log queries with"
+   },
+   {
+    "name": "search_log",
+    "description": "Searches the Output Log with a regular expression."
+   },
+   {
+    "name": "get_log_warnings",
+    "description": "Returns only Warning log entries since the mark."
+   },
+   {
+    "name": "get_log_errors",
+    "description": "Returns only Error/Fatal log entries (with referenced assets) since the mark."
+   },
+   {
+    "name": "get_output_log",
+    "description": "Returns parsed Output Log entries (category, severity, message, continuation lines,"
+   },
+   {
+    "name": "get_cpp_build_status",
+    "description": "Returns the state of a C++ build job: running/succeeded/failed, compiler errors and"
+   },
+   {
+    "name": "start_cpp_build",
+    "description": "Starts an Unreal Build Tool build of the project's C++ in the background and returns"
+   },
+   {
+    "name": "get_blueprint_compile_status",
+    "description": "Returns the current compile status and node messages of a Blueprint WITHOUT recompiling."
+   },
+   {
+    "name": "compile_blueprints_in_folder",
+    "description": "Compiles every Blueprint under a folder and summarises the results."
+   },
+   {
+    "name": "compile_blueprint",
+    "description": "Compiles one Blueprint and returns status plus every node-level error/warning"
+   }
+  ]
+ },
+ {
+  "toolset": "agent_toolkit.toolsets.validation.ValidationTools",
+  "description": "Checks for compile errors, missing/broken references, invalid assets, null properties,\n    missing materials, invalid collision, duplicate names, naming/placement rules,\n    redirectors and unsaved assets, plus explicit auto-fix tools. Run validate_project\n    for a one-call health report.",
+  "tools": [
+   {
+    "name": "add_simple_collision_to_meshes",
+    "description": "Adds a simple collision primitive to static meshes that have none."
+   },
+   {
+    "name": "remove_unused_blueprint_variables",
+    "description": "Removes Blueprint variables that are not referenced by any graph. Without"
+   },
+   {
+    "name": "fix_naming_conventions",
+    "description": "Renames assets to add the expected class prefix (references are fixed up; run"
+   },
+   {
+    "name": "find_unsaved_assets",
+    "description": "Lists all packages (assets and levels) with unsaved changes."
+   },
+   {
+    "name": "check_asset_placement",
+    "description": "Checks asset placement: assets in the /Game root, developer-folder assets referenced"
+   },
+   {
+    "name": "check_naming_conventions",
+    "description": "Checks asset name prefixes per class (BP_, M_, MI_, T_, SM_, SK_, ABP_, WBP_, NS_,"
+   },
+   {
+    "name": "find_duplicate_asset_names",
+    "description": "Finds assets that share a name across folders (ambiguous for humans and agents)."
+   },
+   {
+    "name": "find_invalid_collision",
+    "description": "Finds static meshes with no simple collision that are not set to use complex"
+   },
+   {
+    "name": "find_missing_materials",
+    "description": "Finds static/skeletal mesh assets with empty material slots (loads meshes in the folder)."
+   },
+   {
+    "name": "find_null_properties",
+    "description": "Lists object/class references that are None on a Blueprint's defaults or on a level"
+   },
+   {
+    "name": "find_broken_assets",
+    "description": "Finds broken assets: redirectors pointing nowhere, assets whose class is no longer"
+   },
+   {
+    "name": "find_missing_references",
+    "description": "Lists assets that reference packages which no longer exist (broken dependencies)."
+   },
+   {
+    "name": "validate_level",
+    "description": "Validates the open level: missing meshes/materials, invalid physics collision,"
+   },
+   {
+    "name": "validate_blueprint",
+    "description": "Validates one Blueprint: compile errors/warnings, missing parent, unused variables,"
+   },
+   {
+    "name": "validate_assets",
+    "description": "Runs Epic's Data Validation (all registered validators, incl. project-specific ones) on assets."
+   },
+   {
+    "name": "validate_project",
+    "description": "One-call health report over a folder: missing references, broken assets,"
+   }
+  ]
+ },
+ {
+  "toolset": "agent_toolkit.toolsets.safety.SafetyTools",
+  "description": "Transactions (group edits into one undo step), undo/redo, list of modified assets,\n    file backups and named save points with restore, deletion previews and a journal of\n    every change made through UE Agent Toolkit tools.",
+  "tools": [
+   {
+    "name": "restore_save_point",
+    "description": "Restores the most recent save point with this name (see create_save_point)."
+   },
+   {
+    "name": "create_save_point",
+    "description": "Creates a named save point: a backup of the given assets plus (optionally) every"
+   },
+   {
+    "name": "restore_backup",
+    "description": "Restores files from a backup over the current assets and reloads them. Without"
+   },
+   {
+    "name": "list_backups",
+    "description": "Lists backups and save points, newest first."
+   },
+   {
+    "name": "create_backup",
+    "description": "Copies the on-disk files of assets to Saved/AgentToolkit/Backups/<id>. Unsaved"
+   },
+   {
+    "name": "preview_asset_deletion",
+    "description": "Read-only report used before deleting assets: existence, external referencers,"
+   },
+   {
+    "name": "get_change_journal",
+    "description": "Returns the journal of modifications made through UE Agent Toolkit tools in this"
+   },
+   {
+    "name": "list_modified_assets",
+    "description": "Lists unsaved (dirty) packages, split into content and levels, flagging never-saved ones."
+   },
+   {
+    "name": "get_undo_state",
+    "description": "Returns the undo stack depth, open toolkit transactions and the latest journal entries."
+   },
+   {
+    "name": "redo",
+    "description": "Redoes previously undone transactions."
+   },
+   {
+    "name": "undo",
+    "description": "Undoes the most recent editor transactions (also those made by the user)."
+   },
+   {
+    "name": "end_transaction",
+    "description": "Closes the transaction opened by begin_transaction, committing it as one undo step."
+   },
+   {
+    "name": "begin_transaction",
+    "description": "Opens an undo transaction so that all following edits (from any tool) undo as one step."
+   }
+  ]
+ },
+ {
+  "toolset": "agent_toolkit.toolsets.blueprint_authoring.BlueprintAuthoringTools",
+  "description": "Blueprint editing: typed variables with defaults/replication, components (SCS),\n    functions with typed signatures, custom events (incl. RPC), macros, interfaces, and\n    name-addressed graph editing (add node, connect/disconnect pins, pin defaults, remove/move\n    nodes). Pair with InspectorTools.inspect_blueprint(_graph) and BuildDebugTools.compile_blueprint.",
+  "tools": [
+   {
+    "name": "search_blueprint_node_actions",
+    "description": "Searches the node actions available in a graph (the editor's right-click menu). Strings"
+   },
+   {
+    "name": "move_blueprint_node",
+    "description": "Moves a node to a new graph position."
+   },
+   {
+    "name": "remove_blueprint_nodes",
+    "description": "Deletes nodes (and their links) from a graph."
+   },
+   {
+    "name": "set_blueprint_pin_defaults",
+    "description": "Sets default values of unconnected input pins, e.g. {\"K2Node_CallFunction_0.InString\": \"Hello\","
+   },
+   {
+    "name": "disconnect_blueprint_pins",
+    "description": "Breaks links of a pin (all links, or only the link to other_pin)."
+   },
+   {
+    "name": "connect_blueprint_pins",
+    "description": "Connects pins. Each connection is \"FromNode.OutPin->ToNode.InPin\" using ids from"
+   },
+   {
+    "name": "add_blueprint_node",
+    "description": "Adds a node using locale-independent identifiers and returns its id and pins."
+   },
+   {
+    "name": "remove_blueprint_interface",
+    "description": "Removes an implemented interface (requires the native module)."
+   },
+   {
+    "name": "implement_blueprint_interface",
+    "description": "Adds an interface (Blueprint Interface asset or native UInterface) to a Blueprint and"
+   },
+   {
+    "name": "create_blueprint_macro",
+    "description": "Creates an empty macro graph (requires the native module). Add tunnel pins and"
+   },
+   {
+    "name": "add_custom_event",
+    "description": "Adds a Custom Event, optionally with inputs and RPC replication (Server/Client/Multicast)."
+   },
+   {
+    "name": "set_blueprint_function_flags",
+    "description": "Changes function specifiers. Only provided arguments are changed."
+   },
+   {
+    "name": "create_blueprint_function",
+    "description": "Creates a function graph with a typed signature."
+   },
+   {
+    "name": "attach_blueprint_component",
+    "description": "Re-parents a scene component within the Blueprint's component tree."
+   },
+   {
+    "name": "set_blueprint_component_properties",
+    "description": "Sets default properties of a component template in a Blueprint, e.g."
+   },
+   {
+    "name": "remove_blueprint_component",
+    "description": "Removes a component added in this Blueprint (inherited/native components cannot be removed)."
+   },
+   {
+    "name": "add_blueprint_component",
+    "description": "Adds a component to a Blueprint's component tree (SCS), optionally under a parent"
+   },
+   {
+    "name": "set_blueprint_variable_flags",
+    "description": "Updates variable metadata. Only provided arguments are changed."
+   },
+   {
+    "name": "change_blueprint_variable_type",
+    "description": "Changes the type of a Blueprint variable (connected pins of incompatible type will break;"
+   },
+   {
+    "name": "set_blueprint_variable_default",
+    "description": "Sets the default value of a Blueprint variable (or any inherited CDO property)."
+   },
+   {
+    "name": "add_blueprint_variable",
+    "description": "Adds a member variable with type, default value, category, editability and replication in one call."
+   }
+  ]
+ },
+ {
+  "toolset": "agent_toolkit.toolsets.material_authoring.MaterialAuthoringTools",
+  "description": "Material graph authoring helpers: settings (domain/blend/shading), parameter and texture\n    nodes in one call, material function calls, batch wiring with \"Expr.Output->Expr.Input\" /\n    \"Expr.Output->@base_color\", and compile with error reporting.",
+  "tools": [
+   {
+    "name": "compile_material",
+    "description": "Recompiles a Material and returns compile errors plus shader statistics. Fails with"
+   },
+   {
+    "name": "connect_material_expressions",
+    "description": "Wires expressions in batch. Formats: \"ExprName.Output->ExprName.Input\" or"
+   },
+   {
+    "name": "add_material_function_call",
+    "description": "Adds a Material Function Call node for a MaterialFunction asset."
+   },
+   {
+    "name": "add_texture_sample",
+    "description": "Adds a Texture Sample (or a Texture parameter when parameter_name is given) for a texture."
+   },
+   {
+    "name": "add_material_parameter",
+    "description": "Adds a Scalar/Vector/Texture/StaticSwitch parameter node with name, default and group,"
+   },
+   {
+    "name": "set_material_settings",
+    "description": "Sets material-level settings. Only provided arguments change."
+   }
+  ]
+ },
+ {
+  "toolset": "agent_toolkit.toolsets.input.InputTools",
+  "description": "Enhanced Input authoring: Input Actions, Mapping Contexts, key mappings with triggers and\n    modifiers, project default mapping contexts, and Blueprint wiring (AddMappingContext on\n    BeginPlay, Enhanced Input Action events).",
+  "tools": [
+   {
+    "name": "bind_input_action_event",
+    "description": "Adds an Enhanced Input Action event node (Triggered/Started/Ongoing/Canceled/Completed"
+   },
+   {
+    "name": "add_mapping_context_to_blueprint",
+    "description": "Wires \"Event BeginPlay -> Get Player Controller(0) -> Enhanced Input Local Player Subsystem"
+   },
+   {
+    "name": "register_default_mapping_context",
+    "description": "Adds a Mapping Context to Enhanced Input's project-wide Default Mapping Contexts"
+   },
+   {
+    "name": "list_key_mappings",
+    "description": "Lists all mappings of a Mapping Context with keys, triggers, modifiers and action value types."
+   },
+   {
+    "name": "remove_key_mapping",
+    "description": "Removes the mapping of a key (or all keys when key is omitted) for an action."
+   },
+   {
+    "name": "update_key_mapping",
+    "description": "Replaces the triggers and/or modifiers of an existing mapping (\"none\" clears the list)."
+   },
+   {
+    "name": "add_key_mapping",
+    "description": "Maps a key to an Input Action inside a Mapping Context, with optional triggers/modifiers."
+   },
+   {
+    "name": "create_input_mapping_context",
+    "description": "Creates an Input Mapping Context asset."
+   },
+   {
+    "name": "create_input_action",
+    "description": "Creates an Input Action asset."
+   }
+  ]
+ },
+ {
+  "toolset": "agent_toolkit.toolsets.animation.AnimationTools",
+  "description": "Animation authoring: Anim Blueprints with state machines (states playing sequences or\n    blend spaces, transitions with bool/auto rules), montages with sections and notifies,\n    1D/2D blend spaces, and structured inspection of animation assets.",
+  "tools": [
+   {
+    "name": "inspect_animation_asset",
+    "description": "Returns animation asset info: class, skeleton, length, frames, rate scale, notifies"
+   },
+   {
+    "name": "retarget_animations",
+    "description": "Duplicates animations (sequences, montages, blend spaces) and retargets them to the target"
+   },
+   {
+    "name": "create_ik_retargeter",
+    "description": "Creates an IK Retargeter between two IK Rigs: default ops, fuzzy chain mapping and"
+   },
+   {
+    "name": "create_ik_rig",
+    "description": "Creates an IK Rig for a skeletal mesh, auto-generating retarget chains (and optionally a"
+   },
+   {
+    "name": "create_blend_space",
+    "description": "Creates a blend space (1D when y_name is omitted, 2D otherwise) with axes and samples."
+   },
+   {
+    "name": "add_animation_notify",
+    "description": "Adds an Anim Notify (or Notify State when duration > 0) to a sequence or montage."
+   },
+   {
+    "name": "add_montage_section",
+    "description": "Adds a named section to a montage (e.g. combo steps). Sections are not auto-linked."
+   },
+   {
+    "name": "create_anim_montage",
+    "description": "Creates an Anim Montage from an animation sequence (default slot)."
+   },
+   {
+    "name": "inspect_anim_state_machines",
+    "description": "Returns all state machines of an Anim Blueprint: entry state, states (with animation"
+   },
+   {
+    "name": "add_anim_transition",
+    "description": "Adds a transition between two states with a rule."
+   },
+   {
+    "name": "add_anim_state",
+    "description": "Adds a state that plays a sequence or blend space. The first state becomes the entry state."
+   },
+   {
+    "name": "add_anim_state_machine",
+    "description": "Adds a state machine node to the AnimGraph (optionally wired to Output Pose)."
+   },
+   {
+    "name": "create_anim_blueprint",
+    "description": "Creates an Animation Blueprint targeting a skeleton."
+   }
+  ]
+ },
+ {
+  "toolset": "agent_toolkit.toolsets.ai.AITools",
+  "description": "AI authoring: Blackboard keys, Behavior Tree nodes/decorators/services with properties and\n    blackboard key bindings, AI Perception (sight/hearing) on AI Controllers, pawn AI controller\n    setup, navigation status, path tests and NavMesh rebuild.",
+  "tools": [
+   {
+    "name": "rebuild_navigation",
+    "description": "Rebuilds navigation data for the open level (editor command RebuildNavigation)."
+   },
+   {
+    "name": "test_navigation_path",
+    "description": "Tests whether a navigation path exists between two points in the open level."
+   },
+   {
+    "name": "get_navigation_status",
+    "description": "Reports navigation setup of the open level: NavMeshBoundsVolumes (with extents),"
+   },
+   {
+    "name": "set_pawn_ai_controller",
+    "description": "Sets the AI Controller class and auto-possess mode of a Pawn/Character Blueprint."
+   },
+   {
+    "name": "add_ai_perception",
+    "description": "Adds an AIPerceptionComponent with Sight (and optionally Hearing) to an AI Controller"
+   },
+   {
+    "name": "inspect_eqs_query",
+    "description": "Returns an Environment Query's options: generator class/description and tests with purpose."
+   },
+   {
+    "name": "remove_eqs_item",
+    "description": "Removes an EQS option (test_index -1) or a single test."
+   },
+   {
+    "name": "set_eqs_properties",
+    "description": "Sets properties of an EQS generator (test_index -1) or test, by C++ property name."
+   },
+   {
+    "name": "add_eqs_test",
+    "description": "Adds a test to an EQS option."
+   },
+   {
+    "name": "add_eqs_generator",
+    "description": "Adds an option (generator) to an Environment Query (create the query asset with"
+   },
+   {
+    "name": "inspect_bt_graph",
+    "description": "Returns the editor graph of a Behavior Tree with node ids (needed by the editing tools),"
+   },
+   {
+    "name": "remove_bt_node",
+    "description": "Removes a node (and its decorators/services; children become unconnected)."
+   },
+   {
+    "name": "set_bt_node_properties",
+    "description": "Sets properties of a Behavior Tree node instance. FBlackboardKeySelector properties take"
+   },
+   {
+    "name": "add_bt_subnode",
+    "description": "Adds a decorator (condition) or service (periodic update) to a composite/task node."
+   },
+   {
+    "name": "add_bt_node",
+    "description": "Adds a composite (Selector/Sequence) or task (MoveTo, Wait, ...) under a parent. Children"
+   },
+   {
+    "name": "set_behavior_tree_blackboard",
+    "description": "Assigns the Blackboard asset used by a Behavior Tree."
+   },
+   {
+    "name": "remove_blackboard_key",
+    "description": "Removes a key declared in this Blackboard (Behavior Trees using it will report errors)."
+   },
+   {
+    "name": "add_blackboard_key",
+    "description": "Adds a key to a Blackboard asset."
+   }
+  ]
+ },
+ {
+  "toolset": "agent_toolkit.toolsets.audio.AudioTools",
+  "description": "Audio authoring: Sound Cues from waves, attenuation (3D falloff) assets, per-sound settings\n    and inspection of SoundWave / SoundCue / MetaSound assets.",
+  "tools": [
+   {
+    "name": "inspect_sound",
+    "description": "Returns sound asset details: class, duration, channels, sample rate, looping, volume,"
+   },
+   {
+    "name": "set_sound_properties",
+    "description": "Changes playback settings of a SoundWave, SoundCue or MetaSound source. Only provided"
+   },
+   {
+    "name": "create_sound_attenuation",
+    "description": "Creates a Sound Attenuation asset (3D distance falloff)."
+   },
+   {
+    "name": "create_sound_cue",
+    "description": "Creates a Sound Cue that plays a Sound Wave, with volume/pitch multipliers, looping and attenuation."
+   }
+  ]
+ },
+ {
+  "toolset": "agent_toolkit.toolsets.networking.NetworkingTools",
+  "description": "Multiplayer support: replication summary of an Actor Blueprint (actor net settings,\n    replicated variables with conditions, RPC events, replicating components), actor\n    replication settings, RPC mode changes and Play-In-Editor network mode.",
+  "tools": [
+   {
+    "name": "set_pie_network_mode",
+    "description": "Configures Play-In-Editor for multiplayer testing (Editor Preferences > Level Editor > Play)."
+   },
+   {
+    "name": "set_custom_event_replication",
+    "description": "Changes the RPC mode of an existing custom event (requires the native plugin)."
+   },
+   {
+    "name": "set_actor_replication",
+    "description": "Sets actor-level replication defaults of an Actor Blueprint. Only provided arguments change."
+   },
+   {
+    "name": "inspect_replication",
+    "description": "Returns the replication setup of an Actor Blueprint: actor net settings (replicates,"
+   }
+  ]
+ },
+ {
+  "toolset": "agent_toolkit.toolsets.performance.PerformanceTools",
+  "description": "Finds performance risks: level statistics (actors, triangles, lights, ticking, Niagara),\n    Blueprints using Event Tick, high-poly non-Nanite meshes, oversized textures (memory\n    estimate) and expensive materials. Reports candidates and warnings only.",
+  "tools": [
+   {
+    "name": "find_heavy_assets",
+    "description": "Finds heavy asset candidates: non-Nanite static meshes above a triangle count, textures"
+   },
+   {
+    "name": "find_blueprint_tick_usage",
+    "description": "Lists Blueprints that implement Event Tick (connected or empty) — a common CPU cost."
+   },
+   {
+    "name": "get_frame_stats",
+    "description": "Returns last-frame runtime timings: FPS, game/render/RHI thread ms, GPU ms, draw calls and"
+   },
+   {
+    "name": "get_level_performance_stats",
+    "description": "Static statistics for the open level with warnings: actor/component counts, triangle"
+   }
+  ]
+ },
+ {
+  "toolset": "agent_toolkit.toolsets.umg.UMGTools",
+  "description": "UMG helpers: Canvas Panel slot layout (anchor presets, position, size, alignment, z-order,\n    auto size), widget properties by name, and Widget Animations with keyframes.",
+  "tools": [
+   {
+    "name": "inspect_widget",
+    "description": "Returns a designer widget's class, slot type and Canvas layout (anchors, offsets, alignment)."
+   },
+   {
+    "name": "inspect_widget_animations",
+    "description": "Lists Widget Animations with length, bound widgets and tracks (key counts)."
+   },
+   {
+    "name": "add_widget_animation_keys",
+    "description": "Adds keyframes for a widget property to an animation."
+   },
+   {
+    "name": "create_widget_animation",
+    "description": "Creates a Widget Animation (available as a variable for Play Animation after compiling)."
+   },
+   {
+    "name": "set_widget_properties",
+    "description": "Sets properties of a designer widget by name, e.g. {\"text\": \"Paused\"} (TextBlock),"
+   },
+   {
+    "name": "set_widget_layout",
+    "description": "Sets Canvas Panel slot layout of a widget. Only provided arguments change."
+   }
+  ]
+ },
+ {
+  "toolset": "agent_toolkit.toolsets.metasound.MetaSoundTools",
+  "description": "MetaSound authoring: declarative one-call construction of a MetaSound Source, full graph\n    inspection with node ids, and partial editing of existing MetaSounds (add/remove nodes,\n    connect/disconnect pins, input defaults, graph inputs).",
+  "tools": [
+   {
+    "name": "remove_metasound_graph_input",
+    "description": "Removes an exposed graph input (its connections are removed too)."
+   },
+   {
+    "name": "add_metasound_graph_input",
+    "description": "Adds an exposed graph input (parameter settable from Blueprints / Audio Component)."
+   },
+   {
+    "name": "set_metasound_input_defaults",
+    "description": "Sets node input defaults, e.g. {\"wave.Wave Asset\": \"/Game/Audio/S_Rain\", \"wave.Loop\": true,"
+   },
+   {
+    "name": "disconnect_metasound_pin",
+    "description": "Removes the connection feeding an input pin (\"Node.Input\" or \"@Out Mono\")."
+   },
+   {
+    "name": "connect_metasound_pins",
+    "description": "Connects pins: \"FromNode.Output->ToNode.Input\". Nodes are ids or unique names; \"@Name\""
+   },
+   {
+    "name": "remove_metasound_nodes",
+    "description": "Removes nodes (and their connections) from a MetaSound."
+   },
+   {
+    "name": "add_metasound_node",
+    "description": "Adds a node to an existing MetaSound and returns its id and pins."
+   },
+   {
+    "name": "inspect_metasound",
+    "description": "Returns a MetaSound's graph: nodes (id, name, class, kind, inputs with type/default/link,"
+   },
+   {
+    "name": "build_metasound_source",
+    "description": "Builds a MetaSound Source asset from a declarative graph in one call."
+   }
+  ]
+ },
+ {
+  "toolset": "agent_toolkit.toolsets.world.WorldTools",
+  "description": "Terrain and vegetation: create landscapes (flat or from a heightmap) with a material,\n    inspect landscapes, create foliage types, place foliage instances explicitly or scattered on\n    the ground, and remove/inspect foliage.",
+  "tools": [
+   {
+    "name": "inspect_foliage",
+    "description": "Counts foliage instances per mesh in the open level."
+   },
+   {
+    "name": "remove_all_foliage_instances",
+    "description": "Removes every instance of a Foliage Type in the current level."
+   },
+   {
+    "name": "scatter_foliage",
+    "description": "Scatters foliage instances in a circle, snapping each to the ground with a downward trace"
+   },
+   {
+    "name": "add_foliage_instances",
+    "description": "Adds foliage instances at explicit transforms."
+   },
+   {
+    "name": "create_foliage_type",
+    "description": "Creates a static-mesh Foliage Type asset."
+   },
+   {
+    "name": "set_landscape_material",
+    "description": "Assigns a material to a landscape."
+   },
+   {
+    "name": "inspect_landscapes",
+    "description": "Lists landscapes in the open level with bounds, component count and material."
+   },
+   {
+    "name": "create_landscape",
+    "description": "Creates a landscape centered at location. Default 8x8 components of 63 quads = 505x505"
+   }
+  ]
+ },
+ {
+  "toolset": "agent_toolkit.toolsets.packaging.PackagingTools",
+  "description": "Project packaging via UAT BuildCookRun (build, cook, stage, pak, archive) as background\n    jobs with stage tracking and parsed errors/warnings, plus cook-only runs.",
+  "tools": [
+   {
+    "name": "cancel_packaging",
+    "description": "Stops a running packaging job."
+   },
+   {
+    "name": "get_packaging_status",
+    "description": "Returns the state of a packaging job: running/succeeded/failed, current stage, parsed"
+   },
+   {
+    "name": "start_packaging",
+    "description": "Starts packaging (or cooking) in the background and returns a job id. Save all assets"
+   }
+  ]
+ }
+]

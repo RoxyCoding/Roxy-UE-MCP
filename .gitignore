@@ -1,0 +1,11 @@
+/*
+!/.gitignore
+!/Plugins/
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+__pycache__/
+*.py[cod]
+.env
+.env.*

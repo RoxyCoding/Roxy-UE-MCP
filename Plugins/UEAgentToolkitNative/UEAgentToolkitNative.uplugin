@@ -1,0 +1,23 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.1.0",
+	"FriendlyName": "UE Agent Toolkit Native",
+	"Description": "Optional C++ helpers for UE Agent Toolkit (Blueprint interfaces, macro graphs, RPC/replication conditions, compiler and Message Log access).",
+	"Category": "Editor",
+	"EditorOnly": true,
+	"CanContainContent": false,
+	"IsBetaVersion": true,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "UEAgentToolkitNative",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
+		}
+	],
+	"Plugins": [
+		{ "Name": "Metasound", "Enabled": true },
+		{ "Name": "EnvironmentQueryEditor", "Enabled": true }
+	]
+}

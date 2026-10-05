@@ -1,0 +1,20 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.1.0",
+	"FriendlyName": "UE Agent Toolkit",
+	"Description": "AI-agent toolsets (inspection, assets, level, build/debug, validation, safety, ...) that extend Epic's ToolsetRegistry / Unreal MCP.",
+	"Category": "Editor",
+	"CreatedBy": "",
+	"EditorOnly": true,
+	"CanContainContent": true,
+	"IsBetaVersion": true,
+	"Installed": false,
+	"Modules": [],
+	"Plugins": [
+		{ "Name": "PythonScriptPlugin", "Enabled": true },
+		{ "Name": "EditorScriptingUtilities", "Enabled": true },
+		{ "Name": "ToolsetRegistry", "Enabled": true },
+		{ "Name": "EnhancedInput", "Enabled": true }
+	]
+}
