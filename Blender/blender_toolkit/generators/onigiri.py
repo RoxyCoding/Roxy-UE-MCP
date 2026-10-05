@@ -16,6 +16,8 @@ import mathutils
 from mathutils import Vector, noise
 
 from .. import materials
+from .. import meshutil as mu
+from ..label import StickerDesign, render_sticker
 
 MM = 0.001
 
@@ -165,15 +167,19 @@ def _sample_surface(mesh, count: int, rng: random.Random, keep):
 
 
 def create_onigiri(name: str = 'Onigiri', width: float = 80.0, height: float = 72.0, thickness: float = 33.0,
-                   nori: bool = True, nori_height: float = 0.52, grain_density: float = 0.085,
+                   packaged: bool = True, sticker: StickerDesign | None = None,
+                   nori: bool = True, nori_height: float | None = None, grain_density: float = 0.085,
                    seed: int = 1, location=(0.0, 0.0, 0.0), collection=None) -> bpy.types.Object:
-    """Creates an onigiri and returns the rice object (the nori is parented to it).
+    """Creates an onigiri and returns the rice object (nori, film, tabs and sticker are parented to it).
 
     Args:
         name: Object name.
         width / height / thickness: Size in mm.
-        nori: Wrap nori around the lower part.
-        nori_height: Nori top edge as a fraction of the height.
+        packaged: Convenience-store packaging: transparent film with tear strip, pull tabs (1-3) and a
+            front sticker; the nori sits flat outside the inner film and covers most of the rice.
+        sticker: Sticker text/colors (default design when omitted; set font_path for Japanese).
+        nori: Add nori.
+        nori_height: Nori top edge as a fraction of the height (default 0.88 packaged, 0.52 unwrapped).
         grain_density: Rice grains per mm² of visible surface.
         seed: Random seed (shape lumps, grain placement, nori edge).
         location: World position (m).
@@ -188,6 +194,8 @@ def create_onigiri(name: str = 'Onigiri', width: float = 80.0, height: float = 7
     bm.free()
     body.shade_smooth()
 
+    if nori_height is None:
+        nori_height = 0.88 if packaged else 0.52
     cut = height * nori_height
     edge_noise = Vector((rng.uniform(0, 50), 0, rng.uniform(0, 50)))
 
@@ -257,18 +265,23 @@ def create_onigiri(name: str = 'Onigiri', width: float = 80.0, height: float = 7
     body.materials.append(materials.rice(f'{name}_Rice'))
     obj['generator'] = 'blender_toolkit.onigiri'
 
+    children = []
     if nori:
-        nori_obj = _nori(name, width, height, thickness, corner, seed, nori_edge)
-        coll.objects.link(nori_obj)
-        nori_obj.parent = obj
+        children.append(_nori(name, width, height, thickness, corner, seed, nori_edge,
+                              offset=1.7 if packaged else 1.0, lumps=0.12 if packaged else 0.35))
+    if packaged:
+        children += _package(name, width, height, thickness, corner, seed, sticker or StickerDesign())
+    for child in children:
+        coll.objects.link(child)
+        child.parent = obj
     return obj
 
 
-def _nori(name, width, height, thickness, corner, seed, nori_edge):
+def _nori(name, width, height, thickness, corner, seed, nori_edge, offset=1.0, lumps=0.35):
     """Nori sheet: an offset copy of the body below the (slightly irregular) edge, with wrinkles."""
-    bm = _body_bmesh(width, height, thickness, corner, width * 0.045, seed, lumps=0.35)
+    bm = _body_bmesh(width, height, thickness, corner, width * 0.045, seed, lumps=lumps)
     for v in bm.verts:
-        v.co += v.normal * 1.0 * MM
+        v.co += v.normal * offset * MM
     bm.normal_update()
     # cut with a plane, then follow the irregular edge by deleting faces above it
     geom = bm.verts[:] + bm.edges[:] + bm.faces[:]
@@ -298,3 +311,93 @@ def _nori(name, width, height, thickness, corner, seed, nori_edge):
     mod.offset = 1.0
     mesh.materials.append(materials.nori(f'{name}_Nori'))
     return obj
+
+
+def _package(name, width, height, thickness, corner, seed, sticker: StickerDesign):
+    """Outer film (taut on the faces, crinkled at the folded corners), pull tabs and the front sticker."""
+    rng = random.Random(seed + 101)
+    gap = 3.0
+    bm = _body_bmesh(width, height, thickness, corner, width * 0.045, seed, lumps=0.0)
+    for v in bm.verts:
+        v.co += v.normal * gap * MM
+    bm.normal_update()
+    centers = [(-width / 2 + corner, corner), (width / 2 - corner, corner), (0.0, height - corner)]
+    off = Vector((rng.uniform(0, 99), rng.uniform(0, 99), rng.uniform(0, 99)))
+    sw, sh = 52.0, 26.0                                              # sticker size (mm)
+    zc = height * 0.4
+    for v in bm.verts:
+        p = v.co / MM
+        d = min(math.hypot(p.x - cx, p.z - cz) for cx, cz in centers)
+        fold = max(0.0, 1.0 - d / (corner + 6.0)) ** 1.5             # film is gathered at the corners
+        crinkle = (1.0 - abs(noise.noise(p * 0.35 + off))) ** 3 * 1.4  # sharp ridges
+        # the stiff sticker keeps the film under it flat
+        under = p.y < 0 and abs(p.x) < sw / 2 + 2 and abs(p.z - zc) < sh / 2 + 2
+        v.co += v.normal * ((0.0 if under else fold * crinkle) + noise.noise(p * 0.08 + off) * 0.25) * MM
+    bm.normal_update()
+    from mathutils.bvhtree import BVHTree
+    tree = BVHTree.FromBMesh(bm)
+    film_mesh = bpy.data.meshes.new(name + '_Film')
+    bm.to_mesh(film_mesh)
+    bm.free()
+    film_mesh.shade_smooth()
+    film = bpy.data.objects.new(name + '_Film', film_mesh)
+    film_mesh.materials.append(materials.wrap_film(f'{name}_Film'))
+    parts = [film]
+
+    # pull tabs: 1 at the apex (tear strip), 2 and 3 at the bottom corners
+    cx = sum(c[0] for c in centers) / 3
+    cz = sum(c[1] for c in centers) / 3
+    tab_specs = [(centers[2], (0.55, 0.01, 0.02), '1'), (centers[0], (0.02, 0.12, 0.45), '2'),
+                 (centers[1], (0.02, 0.12, 0.45), '3')]
+    for (px, pz), color, label in tab_specs:
+        dx, dz = px - cx, pz - cz
+        ln = math.hypot(dx, dz)
+        ux, uz = dx / ln, dz / ln                                    # outward
+        vx, vz = -uz, ux                                             # across
+        outline = []
+        start, length = corner + gap - 1.5, 7.5
+        for i in range(13):                                          # tapered tab with a rounded end
+            a = math.pi * i / 12
+            u = start + length + 3.5 * math.sin(a)
+            v = 4.5 * math.cos(a)
+            outline.append((u, v))
+        outline += [(start, -7.0), (start, 7.0)]
+        pts = [((px + ux * u + vx * v) * MM, (pz + uz * u + vz * v) * MM) for u, v in outline]
+        mesh = mu.outline_mesh(f'{name}_Tab{label}', [pts], 0.15 * MM)
+        mesh.transform(mathutils.Matrix.Rotation(math.radians(90), 4, 'X'))
+        for vtx in mesh.vertices:                                    # slight wave
+            vtx.co.y += noise.noise(Vector(vtx.co) * 400 + off) * 0.4 * MM
+        mesh.materials.append(materials.tinted_film(f'{name}_Tab{label}', color))
+        parts.append(bpy.data.objects.new(f'{name}_Tab{label}', mesh))
+
+    # front sticker, projected onto the film
+    nx, nz = 26, 13
+    hits = {}
+    for j in range(-1, nz + 2):
+        for i in range(-1, nx + 2):
+            x = (-sw / 2 + sw * i / nx) * MM
+            z = (zc - sh / 2 + sh * j / nz) * MM
+            hit = tree.ray_cast(Vector((x, -0.3, z)), Vector((0, 1, 0)))
+            hits[i, j] = hit[0].y if hit[0] is not None else -(thickness / 2 + gap) * MM
+    verts, faces, uvs = [], [], []
+    for j in range(nz + 1):
+        for i in range(nx + 1):
+            # rest on the highest film point around (the film between samples must not poke through)
+            y = min(hits[i + di, j + dj] for di in (-1, 0, 1) for dj in (-1, 0, 1)) - 0.3 * MM
+            verts.append(((-sw / 2 + sw * i / nx) * MM, y, (zc - sh / 2 + sh * j / nz) * MM))
+            uvs.append((i / nx, j / nz))
+    for j in range(nz):
+        for i in range(nx):
+            a = j * (nx + 1) + i
+            faces.append((a, a + 1, a + nx + 2, a + nx + 1))
+    mesh = bpy.data.meshes.new(name + '_Sticker')
+    mesh.from_pydata(verts, [], faces)
+    uv = mesh.uv_layers.new(name='UVMap')
+    for poly in mesh.polygons:
+        poly.use_smooth = True
+        for li in poly.loop_indices:
+            uv.data[li].uv = uvs[mesh.loops[li].vertex_index]
+    image = render_sticker(sticker, sw, sh, name=f'{name}_StickerImage')
+    mesh.materials.append(materials.printed_paper(f'{name}_Sticker', image))
+    parts.append(bpy.data.objects.new(name + '_Sticker', mesh))
+    return parts

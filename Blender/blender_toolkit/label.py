@@ -176,3 +176,83 @@ def render_label(design: LabelDesign, width_mm: float, height_mm: float, name: s
         bpy.data.scenes.remove(scene)
         for mat in [m for m in bpy.data.materials if m.name.startswith('_label_') and m.users == 0]:
             bpy.data.materials.remove(mat)
+
+
+@dataclass
+class StickerDesign:
+    """Front sticker of a packaged product (e.g. onigiri)."""
+    title: str = 'TUNA MAYO'
+    subtitle: str = 'ONIGIRI'
+    price: str = '150'
+    header: str = '#c8102e'
+    accent: str = '#f2a900'
+    background: str = '#ffffff'
+    text: str = '#1a1a1a'
+    font_path: str | None = None     # e.g. a Japanese .ttf/.otf for Japanese titles
+
+
+def render_sticker(design: StickerDesign, width_mm: float, height_mm: float, name: str = 'Sticker',
+                   resolution: int = 1024, samples: int = 16):
+    """Renders a rectangular product sticker and returns the packed bpy Image."""
+    W, H = width_mm * MM, height_mm * MM
+    scene = bpy.data.scenes.new(f'_{name}_scene')
+    font = bpy.data.fonts.load(design.font_path, check_existing=True) if design.font_path else None
+    lay = _Layout(scene, W, H, font)
+    try:
+        lay.rect(0, 0, W, H, design.background, 'bg')
+        lay.rect(0, H * 0.7, W, H * 0.3, design.header, 'header')
+        lay.rect(0, H * 0.66, W, H * 0.04, design.accent, 'header_line')
+        lay.text(design.subtitle, W * 0.5, H * 0.85, W * 0.8, H * 0.18, '#ffffff', 'subtitle')
+        lay.text(design.title, W * 0.5, H * 0.42, W * 0.9, H * 0.3, design.text, 'title')
+        lay.rect(W * 0.62, H * 0.03, W * 0.35, H * 0.18, design.accent, 'price_bg')
+        lay.text(design.price, W * 0.795, H * 0.12, W * 0.3, H * 0.13, design.text, 'price')
+        lay.rect(W * 0.04, H * 0.06, W * 0.3, H * 0.03, '#999999', 'small1')
+        lay.rect(W * 0.04, H * 0.13, W * 0.42, H * 0.03, '#999999', 'small2')
+        return _render(scene, lay, W, H, name, resolution, samples)
+    finally:
+        _cleanup(scene, lay)
+
+
+def _render(scene, lay, W, H, name, resolution, samples):
+    cam_data = bpy.data.cameras.new('_label_cam')
+    cam_data.type = 'ORTHO'
+    cam_data.ortho_scale = max(W, H)
+    cam = bpy.data.objects.new('_label_cam', cam_data)
+    scene.collection.objects.link(cam)
+    lay.objects.append(cam)
+    cam.location = (W / 2, H / 2, 1.0)
+    scene.camera = cam
+    r = scene.render
+    r.engine = 'CYCLES'
+    scene.cycles.device = 'CPU'
+    scene.cycles.samples = samples
+    scene.cycles.use_denoising = False
+    if W >= H:
+        r.resolution_x, r.resolution_y = resolution, max(1, round(resolution * H / W))
+    else:
+        r.resolution_x, r.resolution_y = max(1, round(resolution * W / H)), resolution
+    r.resolution_percentage = 100
+    scene.view_settings.view_transform = 'Standard'
+    r.image_settings.file_format = 'PNG'
+    path = os.path.join(tempfile.gettempdir(), f'{name}.png')
+    r.filepath = path
+    bpy.ops.render.render(write_still=True, scene=scene.name)
+    image = bpy.data.images.load(path, check_existing=False)
+    image.name = name
+    image.pack()
+    return image
+
+
+def _cleanup(scene, lay):
+    for obj in lay.objects:
+        data = obj.data
+        bpy.data.objects.remove(obj)
+        if isinstance(data, bpy.types.Mesh):
+            bpy.data.meshes.remove(data)
+        elif isinstance(data, bpy.types.Curve):
+            bpy.data.curves.remove(data)
+        elif isinstance(data, bpy.types.Camera):
+            bpy.data.cameras.remove(data)
+    bpy.data.scenes.remove(scene)
+    for mat in [m for m in bpy.data.materials if m.name.startswith('_label_') and m.users == 0]:
+        bpy.data.materials.remove(mat)

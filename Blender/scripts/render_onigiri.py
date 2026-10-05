@@ -19,7 +19,10 @@ views = args[1].split(',') if len(args) > 1 else ['front', 'three_quarter', 'top
 
 for obj in list(bpy.data.objects):
     bpy.data.objects.remove(obj)
-rice = create_onigiri('Onigiri')
+from blender_toolkit.label import StickerDesign  # noqa: E402
+font = os.environ.get('FONT')
+sticker = StickerDesign(title='ツナマヨネーズ', subtitle='手巻おにぎり', price='¥150', font_path=font) if font else None
+rice = create_onigiri('Onigiri', packaged=os.environ.get('PACKAGED', '1') == '1', sticker=sticker)
 objs = [rice] + list(rice.children)
 print('ONIGIRI', 'faces', len(rice.data.polygons), 'dims_mm', [round(d * 1000, 1) for d in rice.dimensions])
 for p in render_views(objs, out_dir, views=views, samples=int(os.environ.get('SAMPLES', '64'))):

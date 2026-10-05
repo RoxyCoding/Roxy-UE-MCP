@@ -173,3 +173,84 @@ def nori(name: str) -> bpy.types.Material:
     nt.links.new(fibres.outputs['Fac'], bump.inputs['Height'])
     nt.links.new(bump.outputs['Normal'], bsdf.inputs['Normal'])
     return mat
+
+
+def wrap_film(name: str, strip_color: tuple = (0.55, 0.01, 0.02), strip_half_width: float = 0.0035):
+    """Thin transparent packaging film (no refraction offset): fresnel mix of transparent and glossy,
+    fine crinkle bump, and a printed tear strip along the object's X = 0 plane."""
+    mat = bpy.data.materials.get(name) or bpy.data.materials.new(name)
+    mat.use_nodes = True
+    nt = mat.node_tree
+    nt.nodes.clear()
+    out = nt.nodes.new('ShaderNodeOutputMaterial')
+    out.location = (600, 0)
+    transparent = nt.nodes.new('ShaderNodeBsdfTransparent')
+    transparent.location = (0, 150)
+    glossy = nt.nodes.new('ShaderNodeBsdfGlossy')
+    glossy.location = (0, 0)
+    glossy.inputs['Roughness'].default_value = 0.06
+    fresnel = nt.nodes.new('ShaderNodeFresnel')
+    fresnel.location = (0, 300)
+    fresnel.inputs['IOR'].default_value = 1.55
+    film = nt.nodes.new('ShaderNodeMixShader')
+    film.location = (200, 100)
+    nt.links.new(fresnel.outputs['Fac'], film.inputs['Fac'])
+    nt.links.new(transparent.outputs['BSDF'], film.inputs[1])
+    nt.links.new(glossy.outputs['BSDF'], film.inputs[2])
+    # crinkles
+    noise = _noise(nt, 350.0, 6.0, loc=(-500, -250))
+    bump = nt.nodes.new('ShaderNodeBump')
+    bump.location = (-250, -250)
+    bump.inputs['Strength'].default_value = 0.15
+    bump.inputs['Distance'].default_value = 0.0002
+    nt.links.new(noise.outputs['Fac'], bump.inputs['Height'])
+    nt.links.new(bump.outputs['Normal'], glossy.inputs['Normal'])
+    # printed tear strip
+    tc = nt.nodes.new('ShaderNodeTexCoord')
+    tc.location = (-700, 400)
+    sep = nt.nodes.new('ShaderNodeSeparateXYZ')
+    sep.location = (-500, 400)
+    nt.links.new(tc.outputs['Object'], sep.inputs['Vector'])
+    absx = nt.nodes.new('ShaderNodeMath')
+    absx.operation = 'ABSOLUTE'
+    absx.location = (-350, 400)
+    nt.links.new(sep.outputs['X'], absx.inputs[0])
+    mask = nt.nodes.new('ShaderNodeMath')
+    mask.operation = 'LESS_THAN'
+    mask.location = (-200, 400)
+    mask.inputs[1].default_value = strip_half_width
+    nt.links.new(absx.outputs['Value'], mask.inputs[0])
+    ink = nt.nodes.new('ShaderNodeBsdfPrincipled')
+    ink.location = (200, -200)
+    ink.inputs['Base Color'].default_value = (*strip_color, 1)
+    ink.inputs['Roughness'].default_value = 0.3
+    printed = nt.nodes.new('ShaderNodeMixShader')
+    printed.location = (400, 0)
+    nt.links.new(mask.outputs['Value'], printed.inputs['Fac'])
+    nt.links.new(film.outputs['Shader'], printed.inputs[1])
+    nt.links.new(ink.outputs['BSDF'], printed.inputs[2])
+    nt.links.new(printed.outputs['Shader'], out.inputs['Surface'])
+    return mat
+
+
+def printed_paper(name: str, image) -> bpy.types.Material:
+    """Printed paper sticker with a light gloss."""
+    mat, nt, bsdf = _new(name)
+    tex = nt.nodes.new('ShaderNodeTexImage')
+    tex.location = (-450, 250)
+    tex.image = image
+    nt.links.new(tex.outputs['Color'], bsdf.inputs['Base Color'])
+    bsdf.inputs['Roughness'].default_value = 0.45
+    bsdf.inputs['Coat Weight'].default_value = 0.3
+    bsdf.inputs['Coat Roughness'].default_value = 0.1
+    _micro_bump(nt, bsdf, 800.0, 0.02)
+    return mat
+
+
+def tinted_film(name: str, color: tuple) -> bpy.types.Material:
+    """Opaque printed film (pull tabs)."""
+    mat, nt, bsdf = _new(name)
+    bsdf.inputs['Base Color'].default_value = (*color, 1)
+    bsdf.inputs['Roughness'].default_value = 0.25
+    bsdf.inputs['Coat Weight'].default_value = 0.5
+    return mat
