@@ -13,7 +13,7 @@ from collections import deque
 import unreal
 
 from agent_toolkit.core import bp as bpu
-from agent_toolkit.core import resolve
+from agent_toolkit.core import native, resolve
 from agent_toolkit.core.errors import Code, ToolError
 from agent_toolkit.core.serialize import parse_json_arg
 from agent_toolkit.core.tooling import agent_tool, ctx
@@ -406,3 +406,133 @@ class BlueprintGraphTools(unreal.ToolsetDefinition):
                             target=bp.get_path_name())
         return {'previous': old.get_path_name() if old else None, 'parent_class': new_parent.get_path_name(),
                 'changed': True, 'status': bpu.status_name(bp)}
+
+    # ------------------------------------------------- native-backed (UEAgentToolkitNative)
+    @agent_tool(mutates=True)
+    def add_blueprint_node_pin(asset_path: str, node_id: str, graph_name: str | None = None) -> dict:
+        """Adds an input pin to a node with a variable pin count (Sequence, Make Array, Select, Switch...).
+        Requires the native module.
+
+        Args:
+            asset_path: Blueprint asset path.
+            node_id: Node id.
+            graph_name: Graph name (default EventGraph).
+        """
+        bp = _bp(asset_path)
+        lib = native.require('Adding node pins')
+        node = bpu.find_node(bpu.find_graph(bp, graph_name or ''), node_id)
+        pin = native.check(lib.add_node_pin(node), node_id)
+        return {'added_pin': pin, 'node': bpu.node_info(node)}
+
+    @agent_tool(mutates=True)
+    def remove_blueprint_node_pin(asset_path: str, pin: str, graph_name: str | None = None) -> dict:
+        """Removes a pin from a node with a variable pin count (e.g. "K2Node_ExecutionSequence_0.then_2").
+        Requires the native module.
+
+        Args:
+            asset_path: Blueprint asset path.
+            pin: "NodeId.PinName".
+            graph_name: Graph name (default EventGraph).
+        """
+        bp = _bp(asset_path)
+        lib = native.require('Removing node pins')
+        graph = bpu.find_graph(bp, graph_name or '')
+        p = bpu.find_pin(graph, pin)
+        node = p.get_owning_node()
+        native.check(lib.remove_node_pin(node, p.get_pin_name()), pin)
+        return {'removed_pin': pin, 'node': bpu.node_info(node)}
+
+    @agent_tool(mutates=True)
+    def retarget_blueprint_node_class(asset_path: str, node_id: str, new_class: str,
+                                      graph_name: str | None = None) -> dict:
+        """Points a function-call node at the same function on another class (e.g. a base class
+        to a subclass). Requires the native module.
+
+        Args:
+            asset_path: Blueprint asset path.
+            node_id: Call Function node id.
+            new_class: Class name or path that has a function with the same name.
+            graph_name: Graph name (default EventGraph).
+        """
+        bp = _bp(asset_path)
+        lib = native.require('Retargeting node classes')
+        node = bpu.find_node(bpu.find_graph(bp, graph_name or ''), node_id)
+        if node.get_class().get_name() != 'K2Node_CallFunction':
+            raise ToolError(Code.WRONG_TYPE, f'{node_id} is a {node.get_class().get_name()}, not a function call node')
+        native.check(lib.retarget_call_function_class(node, resolve.resolve_class(new_class)), node_id)
+        return bpu.node_info(node)
+
+    @agent_tool(mutates=True)
+    def add_event_dispatcher(asset_path: str, dispatcher_name: str, inputs_json: str | None = None) -> dict:
+        """Creates an Event Dispatcher with optional parameters. Requires the native module.
+
+        Args:
+            asset_path: Blueprint asset path.
+            dispatcher_name: Dispatcher name.
+            inputs_json: JSON list of parameters, e.g. [{"name": "Damage", "type": "float"}].
+        """
+        bp = _bp(asset_path)
+        lib = native.require('Event dispatchers')
+        inputs = parse_json_arg(inputs_json or '', 'inputs_json', list)
+        native.check(lib.add_event_dispatcher(bp, dispatcher_name), bp.get_path_name())
+        for item in inputs:
+            native.check(lib.add_graph_param(bp, dispatcher_name, item['name'], bpu.parse_pin_type(item['type']), False),
+                         bp.get_path_name())
+        BEL.compile_blueprint(bp)
+        return {'dispatcher': dispatcher_name, 'parameters': [i['name'] for i in inputs],
+                'event_dispatchers': [str(d) for d in (BEL.list_event_dispatchers(bp) or [])]}
+
+    @agent_tool(mutates=True)
+    def add_blueprint_dispatcher_params(asset_path: str, dispatcher_name: str, inputs_json: str) -> dict:
+        """Adds parameters to an existing Event Dispatcher signature. Requires the native module.
+
+        Args:
+            asset_path: Blueprint asset path.
+            dispatcher_name: Dispatcher name.
+            inputs_json: JSON list, e.g. [{"name": "Damage", "type": "float"}].
+        """
+        bp = _bp(asset_path)
+        lib = native.require('Event dispatchers')
+        inputs = parse_json_arg(inputs_json, 'inputs_json', list)
+        for item in inputs:
+            native.check(lib.add_graph_param(bp, dispatcher_name, item['name'], bpu.parse_pin_type(item['type']), False),
+                         bp.get_path_name())
+        return {'dispatcher': dispatcher_name, 'added': [i['name'] for i in inputs]}
+
+    @agent_tool(mutates=True)
+    def remove_blueprint_function_params(asset_path: str, function_name: str, names_json: str,
+                                         output: bool = False) -> dict:
+        """Removes parameters from a function graph or Event Dispatcher signature. Requires the native module.
+
+        Args:
+            asset_path: Blueprint asset path.
+            function_name: Function graph or dispatcher name.
+            names_json: JSON list of parameter names, e.g. ["Damage"].
+            output: Remove outputs (Return node) instead of inputs.
+        """
+        bp = _bp(asset_path)
+        lib = native.require('Removing function parameters')
+        names = parse_json_arg(names_json, 'names_json', list)
+        for name in names:
+            native.check(lib.remove_graph_param(bp, function_name, str(name), output), bp.get_path_name())
+        return {'function': function_name, 'removed': names, 'output': output}
+
+    @agent_tool(mutates=True)
+    def set_create_event_function(asset_path: str, node_id: str, function_name: str | None = None,
+                                  graph_name: str | None = None) -> dict:
+        """Gets or sets the function bound by a Create Event node. Requires the native module.
+
+        Args:
+            asset_path: Blueprint asset path.
+            node_id: Create Event node id.
+            function_name: Function or custom event name to assign; omit to only read the current one.
+            graph_name: Graph name (default EventGraph).
+        """
+        bp = _bp(asset_path)
+        lib = native.require('Create Event functions')
+        node = bpu.find_node(bpu.find_graph(bp, graph_name or ''), node_id)
+        if node.get_class().get_name() != 'K2Node_CreateDelegate':
+            raise ToolError(Code.WRONG_TYPE, f'{node_id} is a {node.get_class().get_name()}, not a Create Event node')
+        if function_name:
+            native.check(lib.set_create_event_function(node, function_name), node_id)
+        return {'node': node_id, 'function': str(lib.get_create_event_function(node))}

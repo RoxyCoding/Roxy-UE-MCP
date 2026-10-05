@@ -1,6 +1,13 @@
 #include "AgentToolkitNativeLibrary.h"
 
 #include "EdGraphSchema_K2.h"
+#include "EdGraph/EdGraph.h"
+#include "K2Node_AddPinInterface.h"
+#include "K2Node_CallFunction.h"
+#include "K2Node_CreateDelegate.h"
+#include "K2Node_EditablePinBase.h"
+#include "K2Node_FunctionEntry.h"
+#include "K2Node_FunctionResult.h"
 #include "Engine/Blueprint.h"
 #include "IMessageLogListing.h"
 #include "K2Node_CustomEvent.h"
@@ -229,4 +236,258 @@ TArray<FString> UAgentToolkitNativeLibrary::GetKnownMessageLogNames()
 		}
 	}
 	return Out;
+}
+
+// ---------------------------------------------------------------- node pins / signatures
+namespace AgentToolkitNative
+{
+	static FString Error(const FString& Message)
+	{
+		return TEXT("ERROR: ") + Message;
+	}
+
+	static void MarkModified(UEdGraphNode* Node)
+	{
+		if (UBlueprint* Blueprint = FBlueprintEditorUtils::FindBlueprintForNode(Node))
+		{
+			FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+		}
+	}
+
+	/** Function graph or event dispatcher signature graph by name. */
+	static UEdGraph* FindSignatureGraph(UBlueprint* Blueprint, FName GraphName)
+	{
+		for (UEdGraph* Graph : Blueprint->FunctionGraphs)
+		{
+			if (Graph && Graph->GetFName() == GraphName)
+			{
+				return Graph;
+			}
+		}
+		for (UEdGraph* Graph : Blueprint->DelegateSignatureGraphs)
+		{
+			if (Graph && Graph->GetFName() == GraphName)
+			{
+				return Graph;
+			}
+		}
+		return nullptr;
+	}
+
+	/** Editable-pin nodes carrying the parameters: the entry node for inputs, result nodes for function outputs. */
+	static TArray<UK2Node_EditablePinBase*> FindParamNodes(UEdGraph* Graph, bool bOutput)
+	{
+		TArray<UK2Node_EditablePinBase*> Result;
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (!bOutput && Node && Node->IsA<UK2Node_FunctionEntry>())
+			{
+				Result.Add(CastChecked<UK2Node_EditablePinBase>(Node));
+			}
+			else if (bOutput && Node && Node->IsA<UK2Node_FunctionResult>())
+			{
+				Result.Add(CastChecked<UK2Node_EditablePinBase>(Node));
+			}
+		}
+		return Result;
+	}
+}
+
+FString UAgentToolkitNativeLibrary::AddNodePin(UEdGraphNode* Node)
+{
+	using namespace AgentToolkitNative;
+	if (!Node)
+	{
+		return Error(TEXT("Node is null"));
+	}
+	IK2Node_AddPinInterface* AddPin = Cast<IK2Node_AddPinInterface>(Node);
+	if (!AddPin)
+	{
+		return Error(FString::Printf(TEXT("%s does not support adding pins"), *Node->GetClass()->GetName()));
+	}
+	if (!AddPin->CanAddPin())
+	{
+		return Error(TEXT("No more pins can be added to this node"));
+	}
+	TSet<FName> Before;
+	for (UEdGraphPin* Pin : Node->Pins)
+	{
+		Before.Add(Pin->PinName);
+	}
+	Node->Modify();
+	AddPin->AddInputPin();
+	MarkModified(Node);
+	for (UEdGraphPin* Pin : Node->Pins)
+	{
+		if (!Before.Contains(Pin->PinName))
+		{
+			return Pin->PinName.ToString();
+		}
+	}
+	return FString();
+}
+
+FString UAgentToolkitNativeLibrary::RemoveNodePin(UEdGraphNode* Node, FName PinName)
+{
+	using namespace AgentToolkitNative;
+	if (!Node)
+	{
+		return Error(TEXT("Node is null"));
+	}
+	IK2Node_AddPinInterface* AddPin = Cast<IK2Node_AddPinInterface>(Node);
+	if (!AddPin)
+	{
+		return Error(FString::Printf(TEXT("%s does not support removing pins"), *Node->GetClass()->GetName()));
+	}
+	UEdGraphPin* Pin = Node->FindPin(PinName);
+	if (!Pin)
+	{
+		return Error(FString::Printf(TEXT("Pin %s not found"), *PinName.ToString()));
+	}
+	if (!AddPin->CanRemovePin(Pin))
+	{
+		return Error(FString::Printf(TEXT("Pin %s cannot be removed"), *PinName.ToString()));
+	}
+	Node->Modify();
+	AddPin->RemoveInputPin(Pin);
+	MarkModified(Node);
+	return FString();
+}
+
+FString UAgentToolkitNativeLibrary::RetargetCallFunctionClass(UK2Node_CallFunction* Node, UClass* NewClass)
+{
+	using namespace AgentToolkitNative;
+	if (!Node || !NewClass)
+	{
+		return Error(TEXT("Node and class are required"));
+	}
+	const FName FunctionName = Node->FunctionReference.GetMemberName();
+	UFunction* Function = NewClass->FindFunctionByName(FunctionName);
+	if (!Function)
+	{
+		return Error(FString::Printf(TEXT("Function %s not found on %s"), *FunctionName.ToString(), *NewClass->GetName()));
+	}
+	Node->Modify();
+	Node->SetFromFunction(Function);
+	Node->ReconstructNode();
+	MarkModified(Node);
+	return FString();
+}
+
+FString UAgentToolkitNativeLibrary::AddEventDispatcher(UBlueprint* Blueprint, FName DispatcherName)
+{
+	using namespace AgentToolkitNative;
+	if (!Blueprint || DispatcherName.IsNone())
+	{
+		return Error(TEXT("Blueprint and a dispatcher name are required"));
+	}
+	if (FBlueprintEditorUtils::FindNewVariableIndex(Blueprint, DispatcherName) != INDEX_NONE || FindSignatureGraph(Blueprint, DispatcherName))
+	{
+		return Error(FString::Printf(TEXT("%s already exists"), *DispatcherName.ToString()));
+	}
+	Blueprint->Modify();
+	FEdGraphPinType DelegateType;
+	DelegateType.PinCategory = UEdGraphSchema_K2::PC_MCDelegate;
+	if (!FBlueprintEditorUtils::AddMemberVariable(Blueprint, DispatcherName, DelegateType))
+	{
+		return Error(TEXT("Could not add the delegate variable"));
+	}
+	UEdGraph* Graph = FBlueprintEditorUtils::CreateNewGraph(Blueprint, DispatcherName, UEdGraph::StaticClass(), UEdGraphSchema_K2::StaticClass());
+	if (!Graph)
+	{
+		return Error(TEXT("Could not create the signature graph"));
+	}
+	Graph->bEditable = false;
+	const UEdGraphSchema_K2* K2Schema = GetDefault<UEdGraphSchema_K2>();
+	K2Schema->CreateDefaultNodesForGraph(*Graph);
+	K2Schema->CreateFunctionGraphTerminators(*Graph, static_cast<UClass*>(nullptr));
+	K2Schema->AddExtraFunctionFlags(Graph, (FUNC_BlueprintCallable | FUNC_BlueprintEvent | FUNC_Public));
+	K2Schema->MarkFunctionEntryAsEditable(Graph, true);
+	Blueprint->DelegateSignatureGraphs.Add(Graph);
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+	return FString();
+}
+
+FString UAgentToolkitNativeLibrary::AddGraphParam(UBlueprint* Blueprint, FName GraphName, FName ParamName, const FEdGraphPinType& PinType, bool bOutput)
+{
+	using namespace AgentToolkitNative;
+	UEdGraph* Graph = Blueprint ? FindSignatureGraph(Blueprint, GraphName) : nullptr;
+	if (!Graph)
+	{
+		return Error(FString::Printf(TEXT("Function or dispatcher %s not found"), *GraphName.ToString()));
+	}
+	const TArray<UK2Node_EditablePinBase*> Nodes = FindParamNodes(Graph, bOutput);
+	if (Nodes.IsEmpty())
+	{
+		return Error(bOutput ? TEXT("Graph has no output (Return) node; add a return node or an output via create_blueprint_function")
+							 : TEXT("Graph has no entry node"));
+	}
+	for (UK2Node_EditablePinBase* Node : Nodes)
+	{
+		if (Node->FindPin(ParamName))
+		{
+			return Error(FString::Printf(TEXT("Parameter %s already exists"), *ParamName.ToString()));
+		}
+	}
+	// Entry nodes expose inputs as output pins; result nodes take outputs as input pins.
+	const EEdGraphPinDirection Direction = bOutput ? EGPD_Input : EGPD_Output;
+	for (UK2Node_EditablePinBase* Node : Nodes)
+	{
+		Node->Modify();
+		if (!Node->CreateUserDefinedPin(ParamName, PinType, Direction))
+		{
+			return Error(FString::Printf(TEXT("Could not add parameter %s"), *ParamName.ToString()));
+		}
+	}
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+	return FString();
+}
+
+FString UAgentToolkitNativeLibrary::RemoveGraphParam(UBlueprint* Blueprint, FName GraphName, FName ParamName, bool bOutput)
+{
+	using namespace AgentToolkitNative;
+	UEdGraph* Graph = Blueprint ? FindSignatureGraph(Blueprint, GraphName) : nullptr;
+	if (!Graph)
+	{
+		return Error(FString::Printf(TEXT("Function or dispatcher %s not found"), *GraphName.ToString()));
+	}
+	bool bRemoved = false;
+	for (UK2Node_EditablePinBase* Node : FindParamNodes(Graph, bOutput))
+	{
+		if (Node->FindPin(ParamName))
+		{
+			Node->Modify();
+			Node->RemoveUserDefinedPinByName(ParamName);
+			bRemoved = true;
+		}
+	}
+	if (!bRemoved)
+	{
+		return Error(FString::Printf(TEXT("Parameter %s not found"), *ParamName.ToString()));
+	}
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+	return FString();
+}
+
+FName UAgentToolkitNativeLibrary::GetCreateEventFunction(UK2Node_CreateDelegate* Node)
+{
+	return Node ? Node->GetFunctionName() : NAME_None;
+}
+
+FString UAgentToolkitNativeLibrary::SetCreateEventFunction(UK2Node_CreateDelegate* Node, FName FunctionName)
+{
+	using namespace AgentToolkitNative;
+	if (!Node)
+	{
+		return Error(TEXT("Node is null"));
+	}
+	Node->Modify();
+	Node->SetFunction(FunctionName);
+	Node->HandleAnyChange(true);
+	if (Node->GetFunctionName() != FunctionName)
+	{
+		return Error(FString::Printf(TEXT("Function %s is not compatible with this delegate"), *FunctionName.ToString()));
+	}
+	MarkModified(Node);
+	return FString();
 }

@@ -94,7 +94,7 @@ Editor 内では Session Frontend の `AI.Toolsets.UEAgentToolkit` からも実�
 
 | 用途 | 使う Toolset |
 |---|---|
-| Blueprint 作成・親変更・関数グラフ・Graph DSL | `editor_toolset…BlueprintTools`（作成）+ `BlueprintAuthoringTools`（型付き変数/コンポーネント/関数/RPC/Interface/名前指定のノード編集）+ `BlueprintGraphTools`（JSON によるグラフ一括構築、ノード種類/ピンの事前調査、ノード検索、接続範囲の取得、自動整列、変数削除、関数引数追加、親クラス変更） |
+| Blueprint 作成・親変更・関数グラフ・Graph DSL | `editor_toolset…BlueprintTools`（作成）+ `BlueprintAuthoringTools`（型付き変数/コンポーネント/関数/RPC/Interface/名前指定のノード編集）+ `BlueprintGraphTools`（JSON によるグラフ一括構築、ノード種類/ピンの事前調査、ノード検索、接続範囲の取得、自動整列、変数削除、関数引数追加、親クラス変更、ネイティブ経由のピン増減/ノードクラス差し替え/Event Dispatcher/関数引数削除/Create Event 関数設定） |
 | Material Graph 基本操作 / Material Instance | `MaterialTools`, `MaterialInstanceTools` + `MaterialAuthoringTools`（パラメータ一括作成、設定、Compile Error） |
 | Widget / UMG | `UMGToolSet`, `MVVMToolset` + `UMGTools`（Canvas レイアウト、名前指定のプロパティ、Widget Animation） |
 | Niagara | `NiagaraToolset_System` など |

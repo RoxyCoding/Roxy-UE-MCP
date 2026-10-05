@@ -7,6 +7,9 @@
 
 class UBlueprint;
 class UK2Node_CustomEvent;
+class UK2Node_CallFunction;
+class UK2Node_CreateDelegate;
+class UEdGraphNode;
 
 /**
  * Editor helpers used by the UE Agent Toolkit Python toolsets (unreal.AgentToolkitNativeLibrary).
@@ -68,4 +71,39 @@ public:
 	/** Names of all registered Message Log listings that currently have messages or are known. */
 	UFUNCTION(BlueprintCallable, Category = "AgentToolkit|Build")
 	static TArray<FString> GetKnownMessageLogNames();
+
+	// ------------------------------------------------------------ node pins / signatures
+	// Functions returning FString return an empty string on success and "ERROR: <reason>" on failure.
+
+	/** Adds an input pin to nodes with a variable pin count (Sequence, Make Array, Select, Switch, ...). Returns the new pin name. */
+	UFUNCTION(BlueprintCallable, Category = "AgentToolkit|Blueprint")
+	static FString AddNodePin(UEdGraphNode* Node);
+
+	/** Removes a removable pin (by name) from nodes with a variable pin count. */
+	UFUNCTION(BlueprintCallable, Category = "AgentToolkit|Blueprint")
+	static FString RemoveNodePin(UEdGraphNode* Node, FName PinName);
+
+	/** Points a Call Function node at the same function on another class (keeps links where pins still match). */
+	UFUNCTION(BlueprintCallable, Category = "AgentToolkit|Blueprint")
+	static FString RetargetCallFunctionClass(UK2Node_CallFunction* Node, UClass* NewClass);
+
+	/** Adds an event dispatcher (multicast delegate variable with its signature graph). */
+	UFUNCTION(BlueprintCallable, Category = "AgentToolkit|Blueprint")
+	static FString AddEventDispatcher(UBlueprint* Blueprint, FName DispatcherName);
+
+	/** Adds a parameter to a function graph or event dispatcher signature (input = function input / dispatcher parameter, else function output). */
+	UFUNCTION(BlueprintCallable, Category = "AgentToolkit|Blueprint")
+	static FString AddGraphParam(UBlueprint* Blueprint, FName GraphName, FName ParamName, const FEdGraphPinType& PinType, bool bOutput);
+
+	/** Removes a parameter from a function graph or event dispatcher signature. */
+	UFUNCTION(BlueprintCallable, Category = "AgentToolkit|Blueprint")
+	static FString RemoveGraphParam(UBlueprint* Blueprint, FName GraphName, FName ParamName, bool bOutput);
+
+	/** Function name currently assigned to a Create Event node. */
+	UFUNCTION(BlueprintCallable, Category = "AgentToolkit|Blueprint")
+	static FName GetCreateEventFunction(UK2Node_CreateDelegate* Node);
+
+	/** Assigns a function (on the node's target object class) to a Create Event node. */
+	UFUNCTION(BlueprintCallable, Category = "AgentToolkit|Blueprint")
+	static FString SetCreateEventFunction(UK2Node_CreateDelegate* Node, FName FunctionName);
 };
