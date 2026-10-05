@@ -1,6 +1,7 @@
 /*
 !/.gitignore
 !/Plugins/
+!/Blender/
 Binaries/
 Intermediate/
 Saved/
