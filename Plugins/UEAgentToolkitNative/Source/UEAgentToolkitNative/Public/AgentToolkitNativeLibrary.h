@@ -103,6 +103,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "AgentToolkit|Blueprint")
 	static FName GetCreateEventFunction(UK2Node_CreateDelegate* Node);
 
+	/**
+	 * Functions / custom events on the node's scope class whose parameters match the delegate signature
+	 * (same parameter count and types, return values ignored). A candidate list; SetCreateEventFunction does the final check.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "AgentToolkit|Blueprint")
+	static TArray<FString> ListCompatibleEventFunctions(UK2Node_CreateDelegate* Node);
+
 	/** Assigns a function (on the node's target object class) to a Create Event node. */
 	UFUNCTION(BlueprintCallable, Category = "AgentToolkit|Blueprint")
 	static FString SetCreateEventFunction(UK2Node_CreateDelegate* Node, FName FunctionName);

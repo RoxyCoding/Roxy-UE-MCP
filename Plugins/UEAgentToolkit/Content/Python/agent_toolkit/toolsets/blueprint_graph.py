@@ -536,3 +536,23 @@ class BlueprintGraphTools(unreal.ToolsetDefinition):
         if function_name:
             native.check(lib.set_create_event_function(node, function_name), node_id)
         return {'node': node_id, 'function': str(lib.get_create_event_function(node))}
+
+    @agent_tool()
+    def list_compatible_event_functions(asset_path: str, node_id: str, graph_name: str | None = None) -> dict:
+        """Lists functions/custom events whose parameters match the delegate of a Create Event node
+        (candidates for set_create_event_function; the final check happens when assigning). Requires the
+        native module. Connect the delegate pin of the Create Event node first.
+
+        Args:
+            asset_path: Blueprint asset path.
+            node_id: Create Event node id.
+            graph_name: Graph name (default EventGraph).
+        """
+        bp = _bp(asset_path)
+        lib = native.require('Create Event candidates')
+        node = bpu.find_node(bpu.find_graph(bp, graph_name or ''), node_id)
+        if node.get_class().get_name() != 'K2Node_CreateDelegate':
+            raise ToolError(Code.WRONG_TYPE, f'{node_id} is a {node.get_class().get_name()}, not a Create Event node')
+        names = [str(n) for n in lib.list_compatible_event_functions(node) or []]
+        return {'node': node_id, 'candidates': names,
+                'note': 'Empty usually means the delegate pin is not connected yet.' if not names else ''}

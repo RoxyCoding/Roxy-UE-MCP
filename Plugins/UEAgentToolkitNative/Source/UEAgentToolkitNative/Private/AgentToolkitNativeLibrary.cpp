@@ -491,3 +491,50 @@ FString UAgentToolkitNativeLibrary::SetCreateEventFunction(UK2Node_CreateDelegat
 	MarkModified(Node);
 	return FString();
 }
+
+TArray<FString> UAgentToolkitNativeLibrary::ListCompatibleEventFunctions(UK2Node_CreateDelegate* Node)
+{
+	TArray<FString> Result;
+	if (!Node)
+	{
+		return Result;
+	}
+	const UFunction* Signature = Node->GetDelegateSignature();
+	UClass* ScopeClass = Node->GetScopeClass();
+	if (!Signature || !ScopeClass)
+	{
+		return Result;
+	}
+	auto ParamsOf = [](const UFunction* Function)
+	{
+		TArray<const FProperty*> Params;
+		for (TFieldIterator<FProperty> It(Function); It; ++It)
+		{
+			if (It->HasAnyPropertyFlags(CPF_Parm) && !It->HasAnyPropertyFlags(CPF_ReturnParm))
+			{
+				Params.Add(*It);
+			}
+		}
+		return Params;
+	};
+	const TArray<const FProperty*> Wanted = ParamsOf(Signature);
+	for (TFieldIterator<UFunction> It(ScopeClass); It; ++It)
+	{
+		const UFunction* Candidate = *It;
+		if (Candidate->HasAnyFunctionFlags(FUNC_Delegate) || Candidate->GetName().Contains(TEXT("__")))
+		{
+			continue;
+		}
+		const TArray<const FProperty*> Params = ParamsOf(Candidate);
+		bool bMatches = Params.Num() == Wanted.Num();
+		for (int32 Index = 0; bMatches && Index < Params.Num(); ++Index)
+		{
+			bMatches = Params[Index]->SameType(Wanted[Index]);
+		}
+		if (bMatches)
+		{
+			Result.Add(Candidate->GetName());
+		}
+	}
+	return Result;
+}
