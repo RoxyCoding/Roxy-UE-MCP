@@ -11,6 +11,7 @@ from agent_toolkit.toolsets import animation
 from agent_toolkit.toolsets import assets
 from agent_toolkit.toolsets import audio
 from agent_toolkit.toolsets import blueprint_authoring
+from agent_toolkit.toolsets import blueprint_graph
 from agent_toolkit.toolsets import build_debug
 from agent_toolkit.toolsets import input as input_tools
 from agent_toolkit.toolsets import inspector
@@ -34,6 +35,7 @@ TOOLSET_CLASSES = [
     safety.SafetyTools,
     # Phase 2
     blueprint_authoring.BlueprintAuthoringTools,
+    blueprint_graph.BlueprintGraphTools,
     material_authoring.MaterialAuthoringTools,
     input_tools.InputTools,
     # Phase 3

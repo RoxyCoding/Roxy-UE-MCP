@@ -138,6 +138,73 @@ def _function_graph_editor(bp: unreal.Blueprint, function_name: str):
 
 
 @unreal.uclass()
+def create_node(bp: unreal.Blueprint, graph: unreal.EdGraph, ed, node_kind: str, identifier: str | None,
+                x: int = 0, y: int = 0):
+    """Creates a node from (node_kind, identifier) as documented on add_blueprint_node.
+
+    Returns (node, created); created is False when an existing event node was reused.
+    """
+    kind = node_kind.lower()
+    identifier = identifier or ''
+    if kind != 'branch' and not identifier:
+        raise ToolError(Code.INVALID_ARGUMENT, f'node_kind={kind} requires an identifier')
+    node = None
+    if kind == 'function':
+        node = ed.add_call_function_node(_function_path(identifier))
+    elif kind == 'event':
+        existing = _find_event_node(graph, identifier)
+        if existing is not None:
+            # Widget Blueprints and others already ship default Tick/BeginPlay nodes; a second
+            # one would be a duplicate event that fails to compile.
+            ctx().warn(f'Event {identifier!r} already exists in the graph; returning the existing node.',
+                       'EVENT_EXISTS')
+            return existing, False
+        node = BEL.add_event_override(bp, identifier, unreal.IntPoint(x, y))
+        if node is None and not identifier.startswith('Receive'):
+            node = BEL.add_event_override(bp, 'Receive' + identifier, unreal.IntPoint(x, y))
+    elif kind == 'custom_event':
+        node = ed.add_custom_event_node(identifier)
+    elif kind == 'variable_get':
+        node = ed.add_get_member_variable_node(identifier)
+    elif kind == 'variable_set':
+        node = ed.add_set_member_variable_node(identifier)
+    elif kind == 'branch':
+        node = ed.add_branch_node()
+    elif kind == 'macro':
+        path = identifier if identifier.startswith('/') else f'{_STANDARD_MACROS}:{identifier}'
+        node = ed.add_macro_node(path)
+    elif kind == 'component_event':
+        comp_name, _, delegate = identifier.partition(':')
+        template = _widget_variable(bp, comp_name)
+        if template is None:
+            _, data = bpu.find_subobject(bp, comp_name)
+            template = unreal.SubobjectDataBlueprintFunctionLibrary.get_object_for_blueprint(data, bp)
+        node = ed.add_component_bound_event_node(template, delegate)
+    elif kind == 'action':
+        actions = list(ed.list_available_nodes([]) or [])
+        match = [a for a in actions if a == identifier] or [a for a in actions if a.split('|')[-1] == identifier] \
+            or [a for a in actions if a.split('|')[-1].lower() == identifier.lower()]
+        if not match:
+            raise ToolError(Code.OBJECT_NOT_FOUND, f'No node action matches {identifier!r}',
+                            likely_causes=['Use search_blueprint_node_actions to find the exact action string.'])
+        if len(match) > 1 and match[0] != identifier:
+            ctx().warn(f'{len(match)} actions matched; used {match[0]!r}', 'AMBIGUOUS_ACTION')
+        node = ed.create_node_from_name(match[0], unreal.Vector2D(x, y), [])
+    else:
+        raise ToolError(Code.INVALID_ARGUMENT, f'Unknown node_kind {node_kind!r}',
+                        likely_causes=['function, event, custom_event, variable_get, variable_set, branch, '
+                                       'macro, component_event, action'])
+    if node is None:
+        raise ToolError(Code.UE_OPERATION_FAILED, f'Could not create {kind} node for {identifier!r}',
+                        target=graph.get_path_name(),
+                        likely_causes=['Function/variable/event name is wrong or not available in this Blueprint '
+                                       'context (check inspect_blueprint).',
+                                       'Events and custom events require an event graph.'])
+    if kind != 'event':
+        bpu.set_node_pos(node, x, y)
+    return node, True
+
+
 class BlueprintAuthoringTools(unreal.ToolsetDefinition):
     """Blueprint editing: typed variables with defaults/replication, components (SCS),
     functions with typed signatures, custom events (incl. RPC), macros, interfaces, and
@@ -546,64 +613,7 @@ class BlueprintAuthoringTools(unreal.ToolsetDefinition):
         """
         bp = _bp(asset_path)
         graph, ed = _graph_editor(bp, graph_name)
-        kind = node_kind.lower()
-        identifier = identifier or ''
-        if kind != 'branch' and not identifier:
-            raise ToolError(Code.INVALID_ARGUMENT, f'node_kind={kind} requires an identifier')
-        node = None
-        if kind == 'function':
-            node = ed.add_call_function_node(_function_path(identifier))
-        elif kind == 'event':
-            existing = _find_event_node(graph, identifier)
-            if existing is not None:
-                # Widget Blueprints and others already ship default Tick/BeginPlay nodes; a second
-                # one would be a duplicate event that fails to compile.
-                ctx().warn(f'Event {identifier!r} already exists in the graph; returning the existing node.',
-                           'EVENT_EXISTS')
-                return bpu.node_info(existing)
-            node = BEL.add_event_override(bp, identifier, unreal.IntPoint(x, y))
-            if node is None and not identifier.startswith('Receive'):
-                node = BEL.add_event_override(bp, 'Receive' + identifier, unreal.IntPoint(x, y))
-        elif kind == 'custom_event':
-            node = ed.add_custom_event_node(identifier)
-        elif kind == 'variable_get':
-            node = ed.add_get_member_variable_node(identifier)
-        elif kind == 'variable_set':
-            node = ed.add_set_member_variable_node(identifier)
-        elif kind == 'branch':
-            node = ed.add_branch_node()
-        elif kind == 'macro':
-            path = identifier if identifier.startswith('/') else f'{_STANDARD_MACROS}:{identifier}'
-            node = ed.add_macro_node(path)
-        elif kind == 'component_event':
-            comp_name, _, delegate = identifier.partition(':')
-            template = _widget_variable(bp, comp_name)
-            if template is None:
-                _, data = bpu.find_subobject(bp, comp_name)
-                template = unreal.SubobjectDataBlueprintFunctionLibrary.get_object_for_blueprint(data, bp)
-            node = ed.add_component_bound_event_node(template, delegate)
-        elif kind == 'action':
-            actions = list(ed.list_available_nodes([]) or [])
-            match = [a for a in actions if a == identifier] or [a for a in actions if a.split('|')[-1] == identifier] \
-                or [a for a in actions if a.split('|')[-1].lower() == identifier.lower()]
-            if not match:
-                raise ToolError(Code.OBJECT_NOT_FOUND, f'No node action matches {identifier!r}',
-                                likely_causes=['Use search_blueprint_node_actions to find the exact action string.'])
-            if len(match) > 1 and match[0] != identifier:
-                ctx().warn(f'{len(match)} actions matched; used {match[0]!r}', 'AMBIGUOUS_ACTION')
-            node = ed.create_node_from_name(match[0], unreal.Vector2D(x, y), [])
-        else:
-            raise ToolError(Code.INVALID_ARGUMENT, f'Unknown node_kind {node_kind!r}',
-                            likely_causes=['function, event, custom_event, variable_get, variable_set, branch, '
-                                           'macro, component_event, action'])
-        if node is None:
-            raise ToolError(Code.UE_OPERATION_FAILED, f'Could not create {kind} node for {identifier!r}',
-                            target=graph.get_path_name(),
-                            likely_causes=['Function/variable/event name is wrong or not available in this Blueprint '
-                                           'context (check inspect_blueprint).',
-                                           'Events and custom events require an event graph.'])
-        if kind != 'event':
-            bpu.set_node_pos(node, x, y)
+        node, _ = create_node(bp, graph, ed, node_kind, identifier, x, y)
         return bpu.node_info(node)
 
     @agent_tool(mutates=True)
