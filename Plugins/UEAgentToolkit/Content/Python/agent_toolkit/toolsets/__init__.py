@@ -18,6 +18,7 @@ from agent_toolkit.toolsets import inspector
 from agent_toolkit.toolsets import level
 from agent_toolkit.toolsets import material_authoring
 from agent_toolkit.toolsets import metasound
+from agent_toolkit.toolsets import model_import
 from agent_toolkit.toolsets import networking
 from agent_toolkit.toolsets import packaging
 from agent_toolkit.toolsets import performance
@@ -48,6 +49,7 @@ TOOLSET_CLASSES = [
     # Additions
     umg.UMGTools,
     metasound.MetaSoundTools,
+    model_import.ModelImportTools,
     world.WorldTools,
     packaging.PackagingTools,
 ]

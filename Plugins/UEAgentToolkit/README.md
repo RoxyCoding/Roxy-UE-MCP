@@ -102,6 +102,7 @@ Editor 内では Session Frontend の `AI.Toolsets.UEAgentToolkit` からも実�
 | Automation / Functional Test | `AutomationTestToolset` |
 | Project Settings 任意セクション | `ConfigSettingsToolset` |
 | Static/Skeletal Mesh, DataTable, StringTable | `editor_toolset` 各 Toolset |
+| Blender 等からのモデル取り込み | `ModelImportTools`（取り込み〜テクスチャ設定〜MI 自動生成・スロット割り当て〜命名〜点検を 1 回で。スケール/ピボット/Y-up/Armature ルートボーン/コリジョン等を検出） |
 | Live Coding | `LiveCodingToolset` |
 | Gameplay Tags / GAS / PCG / Physics Asset / Plugin | 各公式 Toolset |
 
