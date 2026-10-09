@@ -5,7 +5,7 @@ AI Agent（Claude / Codex など）が Unreal Editor 内の開発作業を **作
 - **通信は Epic 公式の Unreal MCP (`ModelContextProtocol` プラグイン) をそのまま使用**します。独自サーバーはありません。
 - Toolset は Epic の `ToolsetRegistry` に Python で登録され、公式 MCP の `list_toolsets` / `describe_toolset` / `call_tool` から発見・実行できます。
 - Epic 公式 Toolset（EditorToolset, UMGToolSet, NiagaraToolsets, Sequencer, AutomationTest, ConfigSettings, Logs など）と**重複しない部分**を実装しています。
-- 一覧: [Docs/TOOLS.md](Docs/TOOLS.md)（18 Toolsets / 195 Tools）
+- 一覧: [Docs/TOOLS.md](Docs/TOOLS.md)（18 Toolsets / 199 Tools）
 
 ## 構成
 

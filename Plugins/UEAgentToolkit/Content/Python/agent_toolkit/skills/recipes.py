@@ -10,6 +10,7 @@ PLAYER CHARACTER (move / jump / camera / input)
    CameraComponent under it; give the Mesh a skeletal mesh + anim class if available.
 2. Input Actions: IA_Move (axis2d), IA_Look (axis2d), IA_Jump (bool). Mapping Context:
    W=swizzle, S=swizzle,negate, A=negate, D; Mouse2D for look (negate:y if inverted); SpaceBar jump.
+   Controller: add_gamepad_mappings on the context (Left2D move, Right2D look, buttons).
 3. register_default_mapping_context (project-wide) or add_mapping_context_to_blueprint.
 4. bind_input_action_event per action; wire IA_Jump Triggered->Character:Jump,
    Completed->Character:StopJumping; IA_Move Triggered -> Pawn:AddMovementInput twice
@@ -31,6 +32,8 @@ HUD / PAUSE MENU
 - Widget Blueprints (UMG toolsets) for HUD and pause menu; create + AddToViewport on BeginPlay
   of the PlayerController/Character; pause via GameplayStatics:SetGamePaused and input mode
   WidgetBlueprintLibrary:SetInputMode_UIOnlyEx / GameOnly; bind an IA_Pause action.
+- Controller: setup_gamepad_navigation on the menu buttons (focus + D-pad/stick navigation);
+  map IA_Pause to Gamepad_Special_Right (add_gamepad_mappings does this for Escape/P).
 
 ATTACK SETUP
 - Montage from an attack sequence (sections/notifies), Character:PlayAnimMontage from an

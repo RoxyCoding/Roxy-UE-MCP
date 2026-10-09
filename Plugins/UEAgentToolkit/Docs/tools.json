@@ -644,6 +644,14 @@
    {
     "name": "bind_input_action_event",
     "description": "Adds an Enhanced Input Action event node (Triggered/Started/Ongoing/Canceled/Completed"
+   },
+   {
+    "name": "add_gamepad_mappings",
+    "description": "Adds controller support to a Mapping Context by mirroring its keyboard/mouse mappings"
+   },
+   {
+    "name": "create_force_feedback_effect",
+    "description": "Creates a Force Feedback Effect (controller rumble) asset with one intensity curve."
    }
   ]
  },
@@ -880,6 +888,14 @@
    {
     "name": "inspect_widget",
     "description": "Returns a designer widget's class, slot type and Canvas layout (anchors, offsets, alignment)."
+   },
+   {
+    "name": "set_widget_navigation",
+    "description": "Sets gamepad/keyboard focus navigation per direction (escape / stop / wrap / explicit widget)."
+   },
+   {
+    "name": "setup_gamepad_navigation",
+    "description": "Makes a menu controller-operable in one call: focusable widgets, list/grid navigation, initial focus."
    }
   ]
  },

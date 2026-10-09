@@ -205,9 +205,9 @@ Material graph authoring helpers: settings (domain/blend/shading), parameter and
 | `connect_material_expressions` | Wires expressions in batch. Formats: "ExprName.Output->ExprName.Input" or |
 | `compile_material` | Recompiles a Material and returns compile errors plus shader statistics. Fails with |
 
-## `agent_toolkit.toolsets.input.InputTools` (9)
+## `agent_toolkit.toolsets.input.InputTools` (11)
 
-Enhanced Input authoring: Input Actions, Mapping Contexts, key mappings with triggers and     modifiers, project default mapping contexts, and Blueprint wiring (AddMappingContext on     BeginPlay, Enhanced Input Action events).
+Enhanced Input authoring: Input Actions, Mapping Contexts, key mappings with triggers and     modifiers, project default mapping contexts, Blueprint wiring (AddMappingContext on     BeginPlay, Enhanced Input Action events) and controller support (gamepad mappings,     force feedback).
 
 | Tool | 説明 |
 |---|---|
@@ -220,6 +220,8 @@ Enhanced Input authoring: Input Actions, Mapping Contexts, key mappings with tri
 | `register_default_mapping_context` | Adds a Mapping Context to Enhanced Input's project-wide Default Mapping Contexts |
 | `add_mapping_context_to_blueprint` | Wires "Event BeginPlay -> Get Player Controller(0) -> Enhanced Input Local Player Subsystem |
 | `bind_input_action_event` | Adds an Enhanced Input Action event node (Triggered/Started/Ongoing/Canceled/Completed |
+| `add_gamepad_mappings` | Adds controller support to a Mapping Context by mirroring its keyboard/mouse mappings |
+| `create_force_feedback_effect` | Creates a Force Feedback Effect (controller rumble) asset with one intensity curve. |
 
 ## `agent_toolkit.toolsets.animation.AnimationTools` (13)
 
@@ -300,9 +302,9 @@ Finds performance risks: level statistics (actors, triangles, lights, ticking, N
 | `find_blueprint_tick_usage` | Lists Blueprints that implement Event Tick (connected or empty) — a common CPU cost. |
 | `find_heavy_assets` | Finds heavy asset candidates: non-Nanite static meshes above a triangle count, textures |
 
-## `agent_toolkit.toolsets.umg.UMGTools` (6)
+## `agent_toolkit.toolsets.umg.UMGTools` (8)
 
-UMG helpers: Canvas Panel slot layout (anchor presets, position, size, alignment, z-order,     auto size), widget properties by name, and Widget Animations with keyframes.
+UMG helpers: Canvas Panel slot layout (anchor presets, position, size, alignment, z-order,     auto size), widget properties by name, Widget Animations with keyframes, and gamepad/keyboard     menu navigation (focus rules, focusable widgets, initial focus).
 
 | Tool | 説明 |
 |---|---|
@@ -312,6 +314,8 @@ UMG helpers: Canvas Panel slot layout (anchor presets, position, size, alignment
 | `add_widget_animation_keys` | Adds keyframes for a widget property to an animation. |
 | `inspect_widget_animations` | Lists Widget Animations with length, bound widgets and tracks (key counts). |
 | `inspect_widget` | Returns a designer widget's class, slot type and Canvas layout (anchors, offsets, alignment). |
+| `set_widget_navigation` | Sets gamepad/keyboard focus navigation per direction (escape / stop / wrap / explicit widget). |
+| `setup_gamepad_navigation` | Makes a menu controller-operable in one call: focusable widgets, list/grid navigation, initial focus. |
 
 ## `agent_toolkit.toolsets.metasound.MetaSoundTools` (9)
 

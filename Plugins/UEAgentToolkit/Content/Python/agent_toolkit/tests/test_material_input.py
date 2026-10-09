@@ -86,6 +86,56 @@ class TestInput(ToolTestCase):
         dry = self.assertOk(self.call('register_default_mapping_context', context_path=imc, priority=1, dry_run=True))
         self.assertTrue(any('DefaultMappingContexts' in l for l in dry['change']['added_lines']))
 
+    def test_gamepad_support(self):
+        imc, move, look, jump, fire = (f'{TEST_ROOT}/{n}' for n in ('IMC_Pad', 'IA_PadMove', 'IA_PadLook',
+                                                                    'IA_PadJump', 'IA_PadFire'))
+        for path, vt in ((move, 'axis2d'), (look, 'axis2d'), (jump, 'bool'), (fire, 'bool')):
+            self.assertOk(self.call('create_input_action', asset_path=path, value_type=vt))
+        self.assertOk(self.call('create_input_mapping_context', asset_path=imc))
+        for key, mods in (('W', 'swizzle'), ('S', 'swizzle,negate'), ('A', 'negate'), ('D', None)):
+            self.assertOk(self.call('add_key_mapping', context_path=imc, action_path=move, key=key, modifiers=mods))
+        self.assertOk(self.call('add_key_mapping', context_path=imc, action_path=look, key='Mouse2D', modifiers='negate:y'))
+        self.assertOk(self.call('add_key_mapping', context_path=imc, action_path=jump, key='SpaceBar', triggers='hold:0.3'))
+        self.assertOk(self.call('add_key_mapping', context_path=imc, action_path=fire, key='LeftMouseButton'))
+        self.assertOk(self.call('add_key_mapping', context_path=imc, action_path=fire, key='K'))
+        # multi-value modifier args stay attached to their spec
+        m = self.assertOk(self.call('update_key_mapping', context_path=imc, action_path=fire, key='K',
+                                    modifiers='deadzone:0.1,0.9,radial,scalar:2,2,1,response_curve:2'))
+        self.assertEqual(m['modifiers'], ['DeadZone', 'Scalar', 'ResponseCurveExponential'])
+        dry = self.assertOk(self.call('add_gamepad_mappings', context_path=imc, dry_run=True))
+        planned = {e['key']: e for e in dry['plan']}
+        self.assertEqual(set(planned), {'Gamepad_Left2D', 'Gamepad_Right2D', 'Gamepad_FaceButton_Bottom',
+                                        'Gamepad_RightTrigger'})
+        self.assertIn('negate:y', planned['Gamepad_Right2D']['modifiers'])
+        self.assertEqual(planned['Gamepad_FaceButton_Bottom']['triggers'], 'hold:0.3')
+        self.assertEqual(dry['unmapped_keys'], [{'action': fire, 'key': 'K'}])
+        self.assertEqual(len(self.assertOk(self.call('list_key_mappings', context_path=imc))['mappings']), 8)
+        r = self.assertOk(self.call('add_gamepad_mappings', context_path=imc, key_map='K=Gamepad_RightShoulder'))
+        self.assertEqual(len(r['added']), 5)
+        left = next(a for a in r['added'] if a['key'] == 'Gamepad_Left2D')
+        self.assertEqual(left['modifiers'], ['DeadZone'])
+        again = self.assertOk(self.call('add_gamepad_mappings', context_path=imc))
+        self.assertEqual(again['added'], [])
+        self.assertEqual(len(again['skipped_actions']), 4)
+        self.assertFails(self.call('add_gamepad_mappings', context_path=imc, key_map='K=NotAKey123'), 'INVALID_ARGUMENT')
+
+    def test_force_feedback_effect(self):
+        if getattr(unreal, 'AgentToolkitWorldLibrary', None) is None:
+            self.skipTest('UEAgentToolkitNative not loaded')
+        path = f'{TEST_ROOT}/FF_Test'
+        r = self.assertOk(self.call('create_force_feedback_effect', asset_path=path, curve='0:1,0.15:0.5,0.4:0',
+                                    channels='left_large,right_large'))
+        self.assertAlmostEqual(r['duration'], 0.4)
+        details = unreal.load_asset(path).get_editor_property('channel_details')
+        self.assertEqual(len(details), 1)
+        self.assertTrue(details[0].get_editor_property('affects_left_large'))
+        self.assertFalse(details[0].get_editor_property('affects_left_small'))
+        self.assertFails(self.call('create_force_feedback_effect', asset_path=path), 'ALREADY_EXISTS')
+        self.assertFails(self.call('create_force_feedback_effect', asset_path=f'{TEST_ROOT}/FF_Bad', curve='0:2,1:0'),
+                         'INVALID_ARGUMENT')
+        self.assertFails(self.call('create_force_feedback_effect', asset_path=f'{TEST_ROOT}/FF_Bad', channels='top'),
+                         'INVALID_ARGUMENT')
+
     @requires_editor_ui  # the node menu indexes new Input Actions only with the editor running
     def test_blueprint_wiring(self):
         self.assertOk(self.call('create_input_action', asset_path=f'{TEST_ROOT}/IA_Fire', value_type='bool'))

@@ -113,6 +113,43 @@ class TestUMG(_NativeCase):
         c = _epic('UMGToolSet.UMGToolSet', 'CompileWidgetBlueprint', WidgetBlueprint=wbp_obj)
         self.assertTrue(c, 'widget blueprint failed to compile')
 
+    def test_gamepad_navigation(self):
+        _epic('UMGToolSet.UMGToolSet', 'CreateWidgetBlueprint', FolderPath=TEST_ROOT, AssetName='WBP_Menu',
+              ParentClass='/Script/UMG.UserWidget')
+        wbp = f'{TEST_ROOT}/WBP_Menu'
+        wbp_obj = f'{wbp}.WBP_Menu'
+        root = _epic('UMGToolSet.UMGToolSet', 'AddWidget', WidgetBlueprint=wbp_obj, WidgetClass='/Script/UMG.CanvasPanel',
+                     WidgetDisplayName='Root')
+        root_widget = next((v for k, v in root.items() if k.lower() == 'widget'), None)
+        for name in ('BtnA', 'BtnB', 'BtnC', 'BtnD'):
+            _epic('UMGToolSet.UMGToolSet', 'AddWidget', WidgetBlueprint=wbp_obj, WidgetClass='/Script/UMG.Button',
+                  WidgetDisplayName=name, ParentWidget=root_widget)
+        r = self.assertOk(self.call('setup_gamepad_navigation', widget_blueprint=wbp,
+                                    widget_names='BtnA,BtnB,BtnC', initial_focus='BtnB'))
+        self.assertEqual(r['navigation']['BtnA']['down'], 'BtnB')
+        self.assertEqual(r['navigation']['BtnA']['up'], 'BtnC')  # wrap
+        self.assertEqual(r['navigation']['BtnA']['left'], 'stop')
+        self.assertEqual(r['focus_on_construct'], 'wired')
+        self.assertNotEqual(r['status'], 'error')
+        cdo = unreal.get_default_object(unreal.load_asset(wbp).generated_class())
+        self.assertEqual(str(cdo.get_editor_property('desired_focus_widget').get_editor_property('widget_name')), 'BtnB')
+        again = self.assertOk(self.call('setup_gamepad_navigation', widget_blueprint=wbp, widget_names='BtnA,BtnB,BtnC,BtnD',
+                                        columns=2, wrap=False))
+        self.assertEqual(again['focus_on_construct'], 'already_wired')
+        self.assertEqual(again['navigation']['BtnA']['right'], 'BtnB')
+        self.assertEqual(again['navigation']['BtnA']['down'], 'BtnC')
+        self.assertEqual(again['navigation']['BtnB']['right'], 'stop')
+        n = self.assertOk(self.call('set_widget_navigation', widget_blueprint=wbp, widget_name='BtnD', up='escape',
+                                    focusable=False))
+        self.assertEqual(n['navigation']['up'], 'escape')
+        info = self.assertOk(self.call('inspect_widget', widget_blueprint=wbp, widget_name='BtnD'))
+        self.assertFalse(info['is_focusable'])
+        self.assertFails(self.call('set_widget_navigation', widget_blueprint=wbp, widget_name='BtnD', down='Nope'),
+                         'OBJECT_NOT_FOUND')
+        self.assertFails(self.call('set_widget_navigation', widget_blueprint=wbp, widget_name='BtnD'), 'INVALID_ARGUMENT')
+        self.assertFails(self.call('setup_gamepad_navigation', widget_blueprint=wbp, widget_names='BtnA,BtnA'),
+                         'INVALID_ARGUMENT')
+
 
 class TestMetaSound(ToolTestCase):
     toolset = MetaSoundTools

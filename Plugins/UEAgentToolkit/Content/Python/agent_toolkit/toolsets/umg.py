@@ -1,5 +1,6 @@
 """UMGTools: widget layout (Canvas slot anchors/position/size/alignment), widget properties by
-name and Widget Animations (keyframed opacity / render transform / color).
+name, Widget Animations (keyframed opacity / render transform / color) and gamepad/keyboard
+focus navigation (navigation rules, focusable widgets, initial focus).
 
 Complements Epic's UMGToolSet (create Widget Blueprints, add/move/remove widgets, widget tree,
 compile) and MVVMToolset. Widget Animation and widget lookup use the UEAgentToolkitNative plugin.
@@ -27,6 +28,8 @@ _ANCHORS = {
 _TRANSFORM_CHANNELS = {'translation_x': 0, 'translation_y': 1, 'angle': 2, 'scale_x': 3, 'scale_y': 4,
                        'shear_x': 5, 'shear_y': 6}
 _COLOR_CHANNELS = {'r': 0, 'g': 1, 'b': 2, 'a': 3}
+_NAV_DIRS = ('up', 'down', 'left', 'right', 'next', 'previous')
+_NAV_RULES = {'escape': 'ESCAPE', 'stop': 'STOP', 'wrap': 'WRAP'}
 
 
 def _wbp(asset_path: str) -> unreal.WidgetBlueprint:
@@ -56,10 +59,81 @@ def _floats(text: str, count: int, name: str) -> list[float]:
     return vals
 
 
+def _enum_name(value) -> str:
+    return str(value).split('.')[-1].split(':')[0].strip(' <>')
+
+
+def _nav_data(wbp: unreal.WidgetBlueprint, spec: str) -> unreal.WidgetNavigationData:
+    """"escape" / "stop" / "wrap", or a widget name (explicit navigation to that widget)."""
+    rule = _NAV_RULES.get(spec.strip().lower())
+    if rule:
+        return unreal.WidgetNavigationData(getattr(unreal.UINavigationRule, rule))
+    _widget(wbp, spec.strip())  # the target must exist
+    return unreal.WidgetNavigationData(unreal.UINavigationRule.EXPLICIT, unreal.Name(spec.strip()))
+
+
+def _set_navigation(widget: unreal.Widget, rules: dict) -> None:
+    widget.modify()
+    nav = widget.get_editor_property('navigation')
+    if nav is None:
+        nav = unreal.new_object(unreal.WidgetNavigation, widget)
+    for direction, data in rules.items():
+        nav.set_editor_property(direction, data)
+    widget.set_editor_property('navigation', nav)
+
+
+def _set_focusable(widget: unreal.Widget, focusable: bool) -> bool:
+    try:
+        widget.set_editor_property('is_focusable', focusable)
+        return True
+    except Exception:  # pylint: disable=broad-exception-caught
+        return False
+
+
+def _nav_info(widget: unreal.Widget) -> dict:
+    nav = widget.get_editor_property('navigation')
+    out = {}
+    for direction in _NAV_DIRS if nav is not None else ():
+        data = nav.get_editor_property(direction)
+        rule = _enum_name(data.get_editor_property('rule')).lower()
+        out[direction] = str(data.get_editor_property('widget_to_focus')) if rule == 'explicit' else rule
+    return out
+
+
+def _wire_focus_on_construct(wbp: unreal.WidgetBlueprint) -> str:
+    """Event Construct -> SetFocus (self) so the widget's desired focus target gets focus when shown."""
+    graph = unreal.BlueprintEditorLibrary.find_event_graph(wbp)
+    if graph is None:
+        raise ToolError(Code.WRONG_TYPE, 'Widget Blueprint has no event graph', target=wbp.get_path_name())
+    lib = native.library()
+    if lib is not None:
+        for node in bpu.graph_nodes(graph):
+            member = str(lib.get_node_member_name(node))  # "Widget:SetFocus"
+            if node.get_class().get_name() == 'K2Node_CallFunction' and member.split(':')[-1] == 'SetFocus':
+                return 'already_wired'
+    construct = unreal.BlueprintEditorLibrary.add_event_override(wbp, 'Construct', unreal.IntPoint(0, -300))
+    if construct is None:
+        raise ToolError(Code.UE_OPERATION_FAILED, 'Could not add Event Construct', target=wbp.get_path_name())
+    pos = construct.get_node_pos()
+    focus = bpu.graph_editor(graph).add_call_function_node('/Script/UMG.Widget:SetFocus')
+    if focus is None:
+        raise ToolError(Code.UE_OPERATION_FAILED, 'Could not create a SetFocus node', target=wbp.get_path_name())
+    bpu.set_node_pos(focus, pos.x + 300, pos.y)
+    then_pin = construct.find_then_pin()
+    previous = list(then_pin.list_connected_pins() or [])
+    for p in previous:
+        then_pin.break_single_pin_link(p)
+    then_pin.try_create_connection(focus.find_execute_pin())
+    for p in previous:
+        focus.find_then_pin().try_create_connection(p)
+    return 'wired'
+
+
 @unreal.uclass()
 class UMGTools(unreal.ToolsetDefinition):
     """UMG helpers: Canvas Panel slot layout (anchor presets, position, size, alignment, z-order,
-    auto size), widget properties by name, and Widget Animations with keyframes."""
+    auto size), widget properties by name, Widget Animations with keyframes, and gamepad/keyboard
+    menu navigation (focus rules, focusable widgets, initial focus)."""
 
     @agent_tool(mutates=True)
     def set_widget_layout(widget_blueprint: str, widget_name: str, anchors: str | None = None,
@@ -226,9 +300,125 @@ class UMGTools(unreal.ToolsetDefinition):
         info = {'widget': widget_name, 'class': widget.get_class().get_name(),
                 'slot': slot.get_class().get_name() if slot else None,
                 'visibility': to_jsonable(widget.get_editor_property('visibility')),
-                'render_opacity': to_jsonable(widget.get_editor_property('render_opacity'))}
+                'render_opacity': to_jsonable(widget.get_editor_property('render_opacity')),
+                'navigation': _nav_info(widget)}
+        try:
+            info['is_focusable'] = bool(widget.get_editor_property('is_focusable'))
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
         if isinstance(slot, unreal.CanvasPanelSlot):
             info['layout'] = to_jsonable(slot.get_layout())
             info['z_order'] = slot.get_z_order()
             info['auto_size'] = slot.get_auto_size()
         return info
+
+    @agent_tool(mutates=True)
+    def set_widget_navigation(widget_blueprint: str, widget_name: str, up: str | None = None, down: str | None = None,
+                              left: str | None = None, right: str | None = None, tab_next: str | None = None,
+                              tab_previous: str | None = None, focusable: bool | None = None) -> dict:
+        """Sets a widget's gamepad/keyboard focus navigation per direction (D-pad / left stick /
+        arrow keys; tab_next/tab_previous = Tab / Shift+Tab). Each value is "escape" (default:
+        move to the nearest widget), "stop", "wrap", or a widget name to move to explicitly.
+
+        Args:
+            widget_blueprint: Widget Blueprint path.
+            widget_name: Widget name.
+            up: Rule or target widget for Up.
+            down: Rule or target widget for Down.
+            left: Rule or target widget for Left.
+            right: Rule or target widget for Right.
+            tab_next: Rule or target widget for Tab.
+            tab_previous: Rule or target widget for Shift+Tab.
+            focusable: Set is_focusable (Buttons, sliders, check boxes... must be focusable to be navigated to).
+        """
+        wbp = _wbp(widget_blueprint)
+        widget = _widget(wbp, widget_name)
+        specs = {'up': up, 'down': down, 'left': left, 'right': right, 'next': tab_next, 'previous': tab_previous}
+        rules = {d: _nav_data(wbp, v) for d, v in specs.items() if v}
+        if not rules and focusable is None:
+            raise ToolError(Code.INVALID_ARGUMENT, 'Pass at least one direction or focusable.')
+        if focusable is not None and not _set_focusable(widget, focusable):
+            raise ToolError(Code.INVALID_ARGUMENT, f'{widget.get_class().get_name()} has no is_focusable property',
+                            target=f'{wbp.get_path_name()}:{widget_name}')
+        if rules:
+            _set_navigation(widget, rules)
+        wbp.modify()
+        unreal.BlueprintEditorLibrary.compile_blueprint(wbp)
+        return {'widget': widget_name, 'navigation': _nav_info(widget)}
+
+    @agent_tool(mutates=True)
+    def setup_gamepad_navigation(widget_blueprint: str, widget_names: str, columns: int = 1, wrap: bool = True,
+                                 initial_focus: str | None = None, focus_on_construct: bool = True) -> dict:
+        """Makes a menu operable with a controller in one call: the listed widgets (e.g. buttons)
+        become focusable and get explicit D-pad/stick/arrow navigation as a list or grid (plus Tab
+        order), the Widget Blueprint's Desired Focus is set to the initial widget, and optionally
+        Event Construct -> SetFocus is wired so the first button is focused when the menu opens.
+        A focused Button is pressed with Gamepad A (FaceButton_Bottom) / Enter by default. Show the
+        menu with WidgetBlueprintLibrary:SetInputMode_UIOnlyEx (or GameAndUI) for gamepad input.
+
+        Args:
+            widget_blueprint: Widget Blueprint path.
+            widget_names: Widgets in reading order, comma-separated, e.g. "ResumeButton,OptionsButton,QuitButton".
+            columns: 1 = vertical list, N = grid with N columns (use the widget count for a horizontal row).
+            wrap: Wrap around at the edges (otherwise focus stops).
+            initial_focus: Widget focused first (default: the first listed widget).
+            focus_on_construct: Wire Event Construct -> SetFocus in the Widget Blueprint's event graph.
+        """
+        wbp = _wbp(widget_blueprint)
+        names = split_csv(widget_names)
+        if not names or len(set(names)) != len(names):
+            raise ToolError(Code.INVALID_ARGUMENT, 'widget_names must list one or more distinct widgets')
+        if columns < 1:
+            raise ToolError(Code.INVALID_ARGUMENT, 'columns must be >= 1')
+        initial = initial_focus or names[0]
+        widgets = [_widget(wbp, n) for n in names]
+        if initial not in names:
+            _widget(wbp, initial)
+        not_focusable = [n for n, w in zip(names, widgets) if not _set_focusable(w, True)]
+        count = len(names)
+        rows = (count + columns - 1) // columns
+        edge = 'wrap' if wrap else 'stop'
+
+        def target(i: int, dr: int, dc: int) -> str:
+            r, c = divmod(i, columns)
+            r2, c2 = r + dr, c + dc
+            if dc:
+                row_len = min(columns, count - r * columns)
+                if not 0 <= c2 < row_len:
+                    if not wrap:
+                        return edge
+                    c2 %= row_len
+            if dr:
+                col_rows = [rr for rr in range(rows) if rr * columns + c < count]
+                if r2 not in col_rows:
+                    if not wrap:
+                        return edge
+                    r2 = col_rows[0] if dr > 0 else col_rows[-1]
+            j = r2 * columns + c2
+            return names[j] if j != i else 'stop'
+
+        result = {}
+        for i, (name, widget) in enumerate(zip(names, widgets)):
+            specs = {'up': target(i, -1, 0), 'down': target(i, 1, 0), 'left': target(i, 0, -1),
+                     'right': target(i, 0, 1),
+                     'next': names[(i + 1) % count] if wrap or i + 1 < count else 'stop',
+                     'previous': names[(i - 1) % count] if wrap or i > 0 else 'stop'}
+            specs = {d: 'stop' if v == name else v for d, v in specs.items()}
+            _set_navigation(widget, {d: _nav_data(wbp, v) for d, v in specs.items()})
+            result[name] = _nav_info(widget)
+        cdo = unreal.get_default_object(wbp.generated_class())
+        focus = unreal.WidgetChild()
+        focus.set_editor_property('widget_name', unreal.Name(initial))
+        cdo.set_editor_property('desired_focus_widget', focus)
+        cdo.set_editor_property('is_focusable', True)
+        wired = _wire_focus_on_construct(wbp) if focus_on_construct else 'skipped'
+        wbp.modify()
+        report = bpu.compile_report(wbp, compile_first=True)
+        if report['status'] == 'error':
+            raise ToolError(Code.COMPILE_FAILED, 'Widget Blueprint failed to compile', target=wbp.get_path_name(),
+                            likely_causes=[e['message'] for e in report['errors'][:5]], details=report)
+        if not_focusable:
+            ctx().warn(f'No is_focusable property on {not_focusable}; use Buttons or other focusable widgets.',
+                       'NOT_FOCUSABLE')
+        return {'navigation': result, 'initial_focus': initial, 'focus_on_construct': wired,
+                'status': report['status']}
