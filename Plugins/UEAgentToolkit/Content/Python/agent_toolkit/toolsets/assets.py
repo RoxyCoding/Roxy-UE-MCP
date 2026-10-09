@@ -12,7 +12,7 @@ import os
 
 import unreal
 
-from agent_toolkit.core import backup, deps, editor, resolve
+from agent_toolkit.core import backup, deps, editor, mesh_quality, resolve
 from agent_toolkit.core.errors import Code, ToolError
 from agent_toolkit.core.serialize import from_jsonable, parse_json_arg, split_csv, to_jsonable
 from agent_toolkit.core.tooling import agent_tool, confirmation_required, ctx
@@ -257,6 +257,8 @@ class AssetManagementTools(unreal.ToolsetDefinition):
         if dry_run:
             ctx().mark_modified(False)
             return {'dry_run': True, 'would_save': [p.get_name() for p in pkgs]}
+        mesh_quality.check_meshes(data.get_asset() for p in pkgs
+                                 for data in editor.asset_registry().get_assets_by_package_name(p.get_name()))
         ok = unreal.EditorLoadingAndSavingUtils.save_packages(pkgs, True) if pkgs else True
         still_dirty = sorted(editor.dirty_package_names() & {p.get_name() for p in pkgs})
         if not ok or still_dirty:
@@ -311,7 +313,8 @@ class AssetManagementTools(unreal.ToolsetDefinition):
                             likely_causes=['Unsupported/corrupt file; check BuildDebugTools.get_log_errors.'])
         for f in failed:
             ctx().warn(f'Import produced no assets: {f}', 'IMPORT_FAILED')
-        return {'imported': results, 'failed': failed}
+        checks = mesh_quality.check_paths([p for result in results for p in result['assets']], repair=True)
+        return {'imported': results, 'failed': failed, 'mesh_basis_checks': checks}
 
     @agent_tool(mutates=True, transaction=False)
     def import_fbx(source_file: str, destination_folder: str, mesh_type: str = 'static',
@@ -366,7 +369,7 @@ class AssetManagementTools(unreal.ToolsetDefinition):
             raise ToolError(Code.UE_OPERATION_FAILED, f'FBX import produced no assets: {source_file}',
                             likely_causes=['Wrong mesh_type for the file content, missing skeleton, or an asset '
                                            'with the same name exists (replace_existing=False).'])
-        return {'imported': paths}
+        return {'imported': paths, 'mesh_basis_checks': mesh_quality.check_paths(paths, repair=True)}
 
     @agent_tool(mutates=True, transaction=False)
     def reimport_assets(asset_paths: list[str]) -> dict:
@@ -375,7 +378,7 @@ class AssetManagementTools(unreal.ToolsetDefinition):
         Args:
             asset_paths: Imported assets to refresh from disk.
         """
-        done, failed = [], []
+        done, failed, imported_paths = [], [], []
         for p in asset_paths:
             asset = resolve.load_asset(p)
             src = ''
@@ -395,12 +398,14 @@ class AssetManagementTools(unreal.ToolsetDefinition):
             task.automated = True
             task.save = False
             editor.asset_tools().import_asset_tasks([task])
+            imported_paths.extend(str(path) for path in task.get_editor_property('imported_object_paths'))
             (done.append(package) if task.get_editor_property('imported_object_paths') else
              failed.append({'asset': package, 'reason': 'importer produced no output'}))
         if failed and not done:
             raise ToolError(Code.UE_OPERATION_FAILED, 'Reimport failed for all assets',
                             likely_causes=[f"{f['asset']}: {f['reason']}" for f in failed[:10]])
-        return {'reimported': done, 'failed': failed}
+        return {'reimported': done, 'failed': failed,
+                'mesh_basis_checks': mesh_quality.check_paths(imported_paths, repair=True)}
 
     @agent_tool()
     def export_assets(asset_paths: list[str], export_directory: str) -> dict:

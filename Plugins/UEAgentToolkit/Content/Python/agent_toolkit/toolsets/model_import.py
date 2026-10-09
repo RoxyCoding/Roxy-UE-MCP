@@ -14,7 +14,7 @@ import re
 
 import unreal
 
-from agent_toolkit.core import deps, editor, resolve
+from agent_toolkit.core import deps, editor, mesh_quality, resolve
 from agent_toolkit.core.errors import Code, ToolError
 from agent_toolkit.core.serialize import split_csv
 from agent_toolkit.core.tooling import agent_tool, ctx
@@ -169,6 +169,11 @@ def inspect_mesh(mesh) -> dict:
 
 
 def _inspect_static(mesh, info: dict, issues: list) -> None:
+    errors = mesh_quality.basis_errors(mesh)
+    info['tangent_basis_errors'] = errors
+    for error in errors:
+        issues.append(_issue('INVALID_MESH_BASIS', 'error', error,
+                             'Run repair_mesh_tangent_basis; fix degenerate faces and UVs in the source if it fails.'))
     lib = unreal.EditorStaticMeshLibrary
     try:
         info['triangles'] = int(mesh.get_num_triangles(0))
@@ -516,8 +521,11 @@ class ModelImportTools(unreal.ToolsetDefinition):
             paths += [str(p) for p in t.get_editor_property('imported_object_paths')]
         assets = [a for a in (unreal.load_asset(p) for p in paths) if a is not None]
         meshes = [a for a in assets if isinstance(a, (unreal.StaticMesh, unreal.SkeletalMesh))]
+        ctx().mark_modified(bool(assets))
+        basis_checks = mesh_quality.check_meshes(meshes, repair=True)
         textures = [a for a in assets if isinstance(a, unreal.Texture2D)]
         result: dict = {'imported': [_package(a) for a in assets]}
+        result['mesh_basis_checks'] = basis_checks
         result['textures'] = [r for r in (fix_texture(t, normal_map_convention) for t in textures) if r]
         unknown = [t.get_name() for t in textures if classify_texture(t.get_name())[0] is None]
         if unknown:
@@ -539,6 +547,8 @@ class ModelImportTools(unreal.ToolsetDefinition):
             result['collision_added'] = added
         if apply_naming:
             result['renamed'] = apply_prefixes(assets)
+            for report, mesh in zip(basis_checks, (m for m in meshes if isinstance(m, unreal.StaticMesh))):
+                report['asset'] = mesh.get_path_name()
         result['checks'] = [inspect_mesh(m) for m in meshes]  # after renaming so paths are current
         result['issue_count'] = sum(len(c['issues']) for c in result['checks'])
         return result
@@ -560,7 +570,26 @@ class ModelImportTools(unreal.ToolsetDefinition):
                             likely_causes=['Pass asset_paths and/or folder.'])
         ctx().set_target(folder or _package(meshes[0]))
         checks = [inspect_mesh(m) for m in meshes]
+        mesh_quality.check_meshes(meshes)
         return {'meshes': checks, 'issue_count': sum(len(c['issues']) for c in checks)}
+
+    @agent_tool(mutates=True)
+    def repair_mesh_tangent_basis(asset_paths: str) -> dict:
+        """Repairs invalid static mesh bases by recomputing normals/tangents and removing
+        degenerates on every LOD. Leaves valid artist-authored bases unchanged. Returns failure
+        if any basis remains invalid; fix source geometry/UVs before completing or saving.
+
+        Args:
+            asset_paths: Comma-separated static mesh asset paths.
+        """
+        paths = split_csv(asset_paths)
+        if not paths:
+            raise ToolError(Code.INVALID_ARGUMENT, 'asset_paths must contain a static mesh path')
+        meshes = [resolve.load_asset(path, unreal.StaticMesh) for path in paths]
+        ctx().set_target(asset_paths)
+        reports = mesh_quality.check_meshes(meshes, repair=True)
+        ctx().mark_modified(any(report['repaired'] for report in reports))
+        return {'mesh_basis_checks': reports}
 
     @agent_tool(mutates=True)
     def fix_texture_settings(asset_paths: str | None = None, folder: str | None = None,

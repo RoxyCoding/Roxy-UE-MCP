@@ -117,6 +117,8 @@ Editor 内では Session Frontend の `AI.Toolsets.UEAgentToolkit` からも実�
 
 ## 既知の制約
 
+- StaticMesh の取り込み・再取り込み・保存は全 built LOD の法線／接線／従法線を検査します（許容値 `1e-4`）。取り込み時は不正な場合だけ再計算し、未解決なら失敗します。生成・変換後も `inspect_imported_meshes` → 必要なら `repair_mesh_tangent_basis` → 再検査を行い、警告を残して完了扱いにしないでください。修復はカスタム法線を再計算するため、意図した陰影を確認してください。Native プラグインの再ビルドと Editor 再起動が必要です。
+
 - **ノードメニュー文字列はエディタ言語でローカライズ**されます（例: `ポーン|インプット|AddMovementInput`）。本 Toolkit は関数パス・イベント関数名・変数名で言語非依存にノードを作ります。
 - Asset Registry の参照情報は**保存済みファイル基準**。未保存の参照は検出できないため、削除/未使用判定の前に保存してください（警告を返します）。
 - **Editor 通知（Slate Notification）は取得不可**：エンジンに通知一覧を列挙する公開 API が無く、エンジン改変なしでは実装できません。代替として Message Log（`get_message_log`）と Output Log を使ってください。

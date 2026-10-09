@@ -24,6 +24,54 @@
 #include "Logging/TokenizedMessage.h"
 #include "MessageLogModule.h"
 #include "Modules/ModuleManager.h"
+#include "Engine/StaticMesh.h"
+#include "StaticMeshResources.h"
+#include "StaticMeshCompiler.h"
+
+TArray<FString> UAgentToolkitNativeLibrary::GetStaticMeshBasisErrors(UStaticMesh* Mesh)
+{
+	TArray<FString> Errors;
+	if (!Mesh)
+	{
+		Errors.Add(TEXT("Static mesh is missing."));
+		return Errors;
+	}
+	FStaticMeshCompilingManager::Get().FinishCompilation({Mesh});
+	const FStaticMeshRenderData* Data = Mesh->GetRenderData();
+	if (!Data || Data->LODResources.Num() == 0)
+	{
+		Errors.Add(TEXT("Static mesh has no built LODs; tangent basis could not be checked."));
+		return Errors;
+	}
+	for (int32 LOD = 0; LOD < Data->LODResources.Num(); ++LOD)
+	{
+		const FStaticMeshLODResources& Resource = Data->LODResources[LOD];
+		const FStaticMeshVertexBuffer& Buffer = Resource.VertexBuffers.StaticMeshVertexBuffer;
+		if (Buffer.GetNumVertices() == 0 || !Buffer.GetTangentData())
+		{
+			Errors.Add(FString::Printf(TEXT("LOD %d has no readable tangent basis."), LOD));
+			continue;
+		}
+		int32 Normals = 0, Tangents = 0, Binormals = 0, Degenerate = 0;
+		for (uint32 Vertex = 0; Vertex < Buffer.GetNumVertices(); ++Vertex)
+		{
+			const FVector3f X(Buffer.VertexTangentX(Vertex));
+			const FVector3f Y(Buffer.VertexTangentY(Vertex));
+			const FVector3f Z(Buffer.VertexTangentZ(Vertex));
+			Normals += Z.ContainsNaN() || Z.IsNearlyZero(1.e-4f);
+			Tangents += X.ContainsNaN() || X.IsNearlyZero(1.e-4f);
+			Binormals += Y.ContainsNaN() || Y.IsNearlyZero(1.e-4f);
+			Degenerate += FVector3f::CrossProduct(X, Z).IsNearlyZero(1.e-4f)
+				|| (X - Z).IsNearlyZero(1.f / 255.f);
+		}
+		if (Normals || Tangents || Binormals || Degenerate)
+		{
+			Errors.Add(FString::Printf(TEXT("LOD %d: invalid normals=%d, tangents=%d, binormals=%d, degenerate bases=%d (tolerance 1e-4)."),
+				LOD, Normals, Tangents, Binormals, Degenerate));
+		}
+	}
+	return Errors;
+}
 
 namespace AgentToolkitNative
 {

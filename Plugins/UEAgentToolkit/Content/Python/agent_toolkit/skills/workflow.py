@@ -26,6 +26,19 @@ SELF-CORRECTION LOOP (Blueprints, Materials, Input)
 - Build larger logic in one call with BlueprintGraphTools.build_blueprint_graph (JSON nodes +
   "a.Pin->b.Pin" connections, all-or-nothing), then compile once.
 
+STATIC MESH COMPLETION
+- Before importing or converting generated geometry, remove zero-area/duplicate faces,
+  give every face non-collapsed UVs, and calculate finite, non-zero normals/tangents.
+- After EVERY static mesh creation, conversion, import or geometry update (including
+  external toolsets), run inspect_imported_meshes on the exact resulting asset paths.
+- On tangent basis validation failure run repair_mesh_tangent_basis, then inspect again. If it fails,
+  repair the source geometry/UVs and regenerate/reimport; never declare done or save
+  while basis checks fail or cannot run. A successful creation call is not validation.
+- Keep MikkTSpace enabled. Do not suppress warnings, reduce tolerance, or change the
+  tangent method to hide nearly-zero normals/tangents/binormals (tolerance 1e-4).
+- Check fresh Output Log / AssetCheck messages after the final rebuild; fix remaining
+  mesh warnings before saving and reporting completion. Do not clear them as a fix.
+
 SAFETY
 - Wrap multi-step edits in begin_transaction/end_transaction so one undo reverts them.
 - Asset deletion, saving and config writes are not undoable: rely on the automatic backups

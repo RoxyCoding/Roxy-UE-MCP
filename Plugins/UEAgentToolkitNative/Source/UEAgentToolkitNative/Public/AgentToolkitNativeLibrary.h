@@ -10,6 +10,7 @@ class UK2Node_CustomEvent;
 class UK2Node_CallFunction;
 class UK2Node_CreateDelegate;
 class UEdGraphNode;
+class UStaticMesh;
 
 /**
  * Editor helpers used by the UE Agent Toolkit Python toolsets (unreal.AgentToolkitNativeLibrary).
@@ -19,6 +20,10 @@ UCLASS()
 class UEAGENTTOOLKITNATIVE_API UAgentToolkitNativeLibrary : public UBlueprintFunctionLibrary
 {
 	GENERATED_BODY()
+
+	/** Checks every built LOD for non-finite or nearly-zero normals, tangents and binormals (1e-4). */
+	UFUNCTION(BlueprintCallable, Category = "AgentToolkit|Mesh")
+	static TArray<FString> GetStaticMeshBasisErrors(UStaticMesh* Mesh);
 
 public:
 	/** Adds an interface (native UInterface or Blueprint Interface generated class) to a Blueprint. */
